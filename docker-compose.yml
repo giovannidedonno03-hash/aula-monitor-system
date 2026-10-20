@@ -1,0 +1,57 @@
+services:
+  # 1. Database PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    container_name: monitor_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-aula_monitor_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-aula_monitor_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Backend FastAPI
+  backend:
+    build:
+      context: ./backend
+    container_name: monitor_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://postgres:postgres@monitor_db:5432/aula_monitor_db
+      - SECRET_KEY=${SECRET_KEY:-supersecretkey_per_jwt_aula_monitor_2026}
+      - GOOGLE_CLIENT_ID=284742808943-vu5gadhoreke8mkp44ucb0cm5b53vcqh.apps.googleusercontent.com
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # 3. Frontend Next.js
+  frontend:
+    build:
+      context: ./frontend
+    container_name: monitor_frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_GOOGLE_CLIENT_ID=284742808943-vu5gadhoreke8mkp44ucb0cm5b53vcqh.apps.googleusercontent.com
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
