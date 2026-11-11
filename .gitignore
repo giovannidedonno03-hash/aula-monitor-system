@@ -4,3 +4,12 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
+
+# Copie di sicurezza fatte durante lo sviluppo (non vanno su GitHub)
+_backup*/
+
+# Progetto di riferimento della scuola (non e' nostro codice)
+gestione-ufficio-tecnico---iis-grassi/
+
+# Messaggio di commit preparato
+messaggio_commit.txt

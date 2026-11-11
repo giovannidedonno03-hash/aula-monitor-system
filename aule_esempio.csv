@@ -1,4 +1,127 @@
-code,building,capacity,has_projector
-Aula 1A,Polo A - Piano Terra,100,true
-Lab Microelettronica,Polo B - Secondo Piano,25,true
-Studio Docenti 4,Polo C - Primo Piano,15,false
+codice,tipo,sede,prenotabile,orario_libero,responsabile,assistente_tecnico,dotazioni
+A01,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
+A02,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
+A03,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
+A04,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
+A05,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
+A06,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
+A08,non_assegnabile,Grassi,si,no,Biondo Alessio,,PC cattedra · Sistema di proiezione immersivo · Visori VR (Meta Quest 2)
+A09,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
+A23,non_assegnabile,Grassi,si,si,Ufficio tecnico,,Sedute per riunioni · Pc per proiezioni · Lavagna LIM
+A_disp,non_assegnabile,Grassi,no,no,,,
+Atrio Palestre,corridoio,Grassi,no,no,,,
+B01,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
+B02,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
+B03,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
+B04,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
+B05,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
+B06,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
+B08,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
+B09,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
+B10,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
+B16,non_assegnabile,Grassi,si,no,Adinolfi Anselmo,,PC cattedra · PC per attività · Lim / Monitor Touch · Attrezzature e dispositivi per attività di inclusione
+B17,aula,Grassi,no,no,,,
+B18,lab,Grassi,si,no,Kacher Leila,,PC cattedra · Lim / Monitor Touch · Banconi per esperienze di fisica · Attrezzature per esperienze di fisica
+B19,non_assegnabile,Grassi,no,no,,,
+B20,lab,Grassi,no,no,Tarricone Cataldo,,
+B22,lab,Grassi,no,no,Lico Giorgio,,
+B23,aula_priorita,Grassi,no,no,Provenzano Gaetano,,
+B24,lab,Grassi,no,no,Paesano Melania,,
+B26,lab,Grassi,no,no,Paesano Melania,,
+Backoffice,non_assegnabile,Grassi,no,no,,,
+C01,aula_priorita,Grassi,no,no,,,
+C02,aula,Grassi,no,no,,,
+C03,aula,Grassi,no,no,,,
+C04,aula,Grassi,no,no,,,
+C05,aula,Grassi,no,no,,,
+C06,aula,Grassi,no,no,,,
+C08,aula,Grassi,no,no,,,
+C09,aula,Grassi,no,no,,,
+C10,aula,Grassi,no,no,,,
+C16,aula,Grassi,no,no,,,
+C17,aula,Grassi,no,no,,,
+C18,aula,Grassi,no,no,,,
+C19,aula,Grassi,no,no,,,
+C20,aula,Grassi,no,no,,,
+C21,aula,Grassi,no,no,,,
+C22,lab,Grassi,no,no,Tarda Salvatore,,
+C23,lab,Grassi,no,no,Tarda Salvatore,,
+C24,aula,Grassi,no,no,,,
+C25,lab,Grassi,no,no,Genta Giampaola,,
+C26,lab,Grassi,no,no,Disalvo Stefano,,
+Commissione Fumo,corridoio,Grassi,no,no,,,
+Corridoio A01-A06,corridoio,Grassi,no,no,,,
+Corridoio A09-A08,corridoio,Grassi,no,no,,,
+Corridoio B01-B06,corridoio,Grassi,no,no,,,
+Corridoio B08-B10,corridoio,Grassi,no,no,,,
+Corridoio B17-B20,corridoio,Grassi,no,no,,,
+Corridoio B22-B26,corridoio,Grassi,no,no,,,
+Corridoio C01-C06,corridoio,Grassi,no,no,,,
+Corridoio C08-C10,corridoio,Grassi,no,no,,,
+Corridoio C16-C20,corridoio,Grassi,no,no,,,
+Corridoio C22-C26,corridoio,Grassi,no,no,,,
+Corridoio Reparti piano terra,corridoio,Grassi,no,no,,,
+Corridoio Reparti primo piano,corridoio,Grassi,no,no,,,
+Cortile ingresso lato Via Paolo Veronese,corridoio,Grassi,no,no,,,
+Cortile piazza interna,corridoio,Grassi,no,no,,,
+Cortile pista atletica e campo calcetto,corridoio,Grassi,no,no,,,
+FrontOffice,non_assegnabile,Grassi,no,no,,,
+G Corridoio G01-05,corridoio,Gianelli,no,no,,,
+G Cortile porta G05,corridoio,Gianelli,no,no,,,
+G00,non_assegnabile,Gianelli,no,no,Ferlazzo Giovanni,,
+G01,aula,Gianelli,no,no,,,
+G02,aula,Gianelli,no,no,,,
+G03,aula,Gianelli,no,no,,,
+G04,aula,Gianelli,no,no,,,
+G05,aula,Gianelli,no,no,,,
+G06,non_assegnabile,Gianelli,no,no,,,
+G11,aula,Gianelli,no,no,,,
+G12,aula,Gianelli,no,no,,,
+G13,aula,Gianelli,no,no,,,
+G14,non_assegnabile,Gianelli,no,no,,,
+G15,non_assegnabile,Gianelli,no,no,,,
+G16,non_assegnabile,Gianelli,no,no,,,
+G_disp,non_assegnabile,Gianelli,no,no,,,
+I02,non_assegnabile,Grassi,no,no,,,
+I03,non_assegnabile,Grassi,no,no,,,
+I06,non_assegnabile,Grassi,no,no,,,
+I15A,aula_priorita,Grassi,no,no,,,
+I15B,aula_priorita,Grassi,no,no,,,
+I19,lab,Grassi,no,no,Masieri Chiara,,
+I21,non_assegnabile,Grassi,no,no,,,
+I23,non_assegnabile,Grassi,si,no,Ufficio tecnico,,
+I36,aula,Grassi,no,no,,,
+I38,lab,Grassi,no,no,Dal Bello Barbara,,
+NOAULA,noaula,Grassi,no,no,,,
+P13,non_assegnabile,Grassi,no,no,,,
+Palestre,palestra,Grassi,no,no,Scarafiotti Enrico,,
+R01,lab,Grassi,no,no,Fois Alessio,,
+R02,non_assegnabile,Grassi,no,no,Fois Alessio,,
+R05,aula,Grassi,no,no,Morreale Danilo,,
+R06,aula,Grassi,no,no,,,
+R07,non_assegnabile,Grassi,no,no,Volpe Salvatore,,
+R08,non_assegnabile,Grassi,no,no,Fois Alessio,,
+R09/10,aula,Grassi,no,no,,,
+R12/13,lab,Grassi,no,no,Palombella Pietro,,
+R14,aula,Grassi,no,no,,,
+R14A,aula,Grassi,no,no,,,
+R15,aula,Grassi,no,no,,,
+R16,aula,Grassi,no,no,,,
+R20,aula,Grassi,no,no,,,
+R21,lab,Grassi,no,no,Corbasi Claudio,,
+R22,non_assegnabile,Grassi,no,no,Corbasi Claudio,,
+R22A,aula,Grassi,no,no,,,
+R23,lab,Grassi,no,no,Pullella Leopoldo,,
+R25,lab,Grassi,no,no,Urso Marco,,
+R26,lab,Grassi,no,no,Corbasi Claudio,,
+R27/28,lab,Grassi,no,no,,,
+R30,aula,Grassi,no,no,,,
+R31,lab,Grassi,no,no,Morreale Danilo,,
+R31A,lab,Grassi,no,no,Morreale Danilo,,
+R32,non_assegnabile,Grassi,no,no,Sapino Marco,,
+R33,aula,Grassi,no,no,,,
+R34,aula,Grassi,no,no,,,
+R35,aula,Grassi,no,no,,,
+R36,aula,Grassi,no,no,,,
+R37,lab,Grassi,no,no,Bottone Davide,,
+R38,lab,Grassi,no,no,Bertino Giovanni,,

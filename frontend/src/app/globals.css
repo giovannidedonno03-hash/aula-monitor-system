@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+/* La variante dark: di Tailwind segue la classe .dark impostata dal selettore tema */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  /* LIGHT MODE (Colori chiari ma caldi: toni Stone/Sabbia eleganti) */
+  :root {
+    --bg-main: #f5f5f4;        /* Stone 100 - Fondo generale chiaro e caldo */
+    --bg-card: #ffffff;        /* Bianco puro per le schede */
+    --bg-subtle: #e7e5e4;      /* Stone 200 - Sfondi secondari/hover */
+    --border-color: #e7e5e4;  /* Stone 200 - Bordi delicati */
+    --text-main: #1c1917;      /* Stone 900 - Testi principali scurissimi caldi */
+    --text-muted: #78716c;     /* Stone 500 - Testi secondari */
+    color-scheme: light;
+  }
+
+  /* DARK MODE (Colori scuri e freddi: toni Slate/Antracite) */
+  .dark {
+    --bg-main: #0f172a;        /* Slate 900 */
+    --bg-card: #020617;        /* Slate 950 */
+    --bg-subtle: #1e293b;      /* Slate 800 */
+    --border-color: #1e293b;  /* Slate 800 */
+    --text-main: #f8fafc;      /* Slate 50 */
+    --text-muted: #94a3b8;     /* Slate 400 */
+    color-scheme: dark;
+  }
+}
+
+body {
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  font-family: system-ui, -apple-system, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}

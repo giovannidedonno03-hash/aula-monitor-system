@@ -1,6 +1,6 @@
 # Aula Monitor System
 
-Piattaforma web full-stack per il monitoraggio delle infrastrutture e la gestione delle segnalazioni di guasto (ticketing system) nelle aule e nei laboratori universitari.
+Piattaforma web full-stack per il monitoraggio delle infrastrutture e la gestione delle segnalazioni di guasto (ticketing system) nelle aule e nei laboratori di una scuola superiore (ITTS C. Grassi), con prenotazione delle aule.
 
 ---
 
@@ -16,11 +16,48 @@ Piattaforma web full-stack per il monitoraggio delle infrastrutture e la gestion
 
 ## Modello dei Ruoli (RBAC)
 
-Il sistema gestisce 4 livelli di autorizzazione:
-1. STUDENTE: Consulta lo stato delle aule e invia segnalazioni di guasto.
-2. DOCENTE: Consulta le aule e apre ticket prioritari per la didattica.
-3. TECNICO: Prende in carico e aggiorna lo stato dei ticket di guasto.
-4. ADMIN: Gestisce gli utenti e promuove i ruoli, aggiunge/rimuove aule ed effettua l'importazione massiva da file CSV.
+Il sistema usa gli stessi ruoli del gestionale dell'Ufficio Tecnico dell'IIS Grassi (gli studenti non hanno accesso):
+1. SUPERVISORE: gestisce utenti e ruoli, aule (anche import CSV) e tutte le segnalazioni; può eliminare qualsiasi ticket.
+2. MANAGER (Ufficio Tecnico): vede tutte le segnalazioni, le prende in carico e ne cambia lo stato (anche inoltro a FACTOTUM).
+3. RESPONSABILE_LAB: docente responsabile di laboratorio.
+4. ASSISTENTE_TECNICO: assistente tecnico (AT) di laboratorio.
+5. UTENTE: docente / personale; apre segnalazioni e prenota le aule.
+
+Il primo utente che accede diventa SUPERVISORE, tutti gli altri UTENTE. Responsabile Lab, Assistente Tecnico e Utente vedono solo le proprie segnalazioni.
+
+Stati dei ticket: APERTO → IN CARICO → IN ESECUZIONE → INOLTRATO A FACTOTUM → RISOLTO.
+Ogni ticket ha plesso (Sede Principale / Gianelli), categoria e priorità (Bassa, Media, Alta, Urgente).
+
+## Elenco dei locali
+
+L'elenco ufficiale dei locali della scuola (126 locali, sede principale e plesso Gianelli) è in `backend/data/aule_grassi.csv`, con le colonne:
+
+`codice,tipo,sede,prenotabile,orario_libero,responsabile,assistente_tecnico,dotazioni`
+
+Il codice è Lettera piano (A, B, C, I, G, R, P) + numero; i locali G sono nel plesso Gianelli. Solo i locali con `prenotabile = si` compaiono nella pagina Prenotazioni.
+
+Per sostituire tutti i locali del database con quelli del file (i locali che non sono nell'elenco vengono eliminati insieme ai loro ticket e prenotazioni):
+
+```bash
+docker compose exec backend python import_aule.py              # anteprima, non modifica nulla
+docker compose exec backend python import_aule.py --conferma   # applica
+```
+
+Il pulsante "Importa CSV" della pagina Aule accetta lo stesso formato (ad esempio `aule_esempio.csv` nella cartella principale, che contiene lo stesso elenco), ma aggiunge o aggiorna i locali senza eliminarne nessuno.
+
+## Lavoro sui ticket (Ufficio Tecnico)
+
+Cliccando su una segnalazione si apre il dettaglio, dove Supervisore e Manager possono:
+- cambiare lo stato (anche inoltro a FACTOTUM);
+- **prendere in carico** o **lasciare** il ticket; il Supervisore può assegnarlo a uno o più collaboratori;
+- scrivere **commenti interni** (visibili solo all'Ufficio Tecnico) taggando i colleghi con @Cognome.
+
+La vista **Assegnate a me** (`/ticket?vista=assegnate`) mostra i ticket del tecnico collegato.
+La pagina **Statistiche** (`/statistiche`) riporta tasso di risoluzione, tempi medi di presa in carico e risoluzione, carico per collaboratore, ripartizione per stato, categoria, priorità e plesso, e l'andamento degli ultimi 14 giorni.
+
+## Dashboard TV
+
+La pagina `/tv` mostra a schermo intero contatori, colonne per stato, carico dei tecnici e un ticker delle urgenze, con aggiornamento automatico ogni 30 secondi. È visibile a Supervisore e Manager; per un televisore senza login usare `http://localhost:3000/tv?kiosk=true`.
 
 ---
 
@@ -60,13 +97,13 @@ docker exec -it monitor_backend python seed.py
 
 ## Importazione Massiva Aule (CSV)
 
-Gli utenti registrati con ruolo ADMIN possono caricare nuove aule in blocco dall'interfaccia web (sezione "Aule e Laboratori") tramite il pulsante "Importa CSV".
+Gli utenti con ruolo SUPERVISORE possono caricare i locali in blocco dall'interfaccia web (sezione "Aule e Laboratori") tramite il pulsante "Importa CSV".
 
-Un file di esempio pronto per il test (`aule_esempio.csv`) è presente nella radice di questo repository con la seguente struttura:
+Il file `aule_esempio.csv` nella radice del repository contiene l'elenco completo dei locali con la seguente struttura:
 
 ```csv
-code,building,capacity,has_projector
-Aula Magna,Polo A - Piano Terra,250,true
-Lab Informatica 1,Polo B - Primo Piano,40,true
-Aula 3B,Polo A - Secondo Piano,80,true
+codice,tipo,sede,prenotabile,orario_libero,responsabile,assistente_tecnico,dotazioni
+A01,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
+A23,non_assegnabile,Grassi,si,si,Ufficio tecnico,,Sedute per riunioni · Pc per proiezioni · Lavagna LIM
+G01,aula,Gianelli,no,no,,,
 ```

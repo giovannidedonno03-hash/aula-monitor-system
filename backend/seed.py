@@ -8,6 +8,9 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from app.database import SessionLocal, engine, Base
 import app.models as models
+from app.room_import import parse_rooms_csv, apply_rooms
+
+DEFAULT_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "aule_grassi.csv")
 
 def seed_database():
     print("Avvio del processo di Seeding del Database...")
@@ -19,29 +22,16 @@ def seed_database():
     try:
         # 1. Controlla se esistono già aule per evitare duplicati
         if db.query(models.Room).count() > 0:
-            print("Il database contiene già delle aule. Seeding annullato per evitare duplicazioni.")
+            print("Il database contiene già dei locali (per sostituirli usa import_aule.py). Seeding annullato per evitare duplicazioni.")
             return
 
-        print("Creazione Aule di prova...")
-        rooms_data = [
-            {"code": "Aula Magna", "building": "Polo A - Piano Terra", "capacity": 250, "has_projector": True, "is_active": True},
-            {"code": "Lab Informatica 1", "building": "Polo B - Primo Piano", "capacity": 40, "has_projector": True, "is_active": True},
-            {"code": "Aula 3B", "building": "Polo A - Secondo Piano", "capacity": 80, "has_projector": True, "is_active": True},
-            {"code": "Aula Tutorato 12", "building": "Polo C - Piano Terra", "capacity": 30, "has_projector": False, "is_active": True},
-            {"code": "Lab Elettronica", "building": "Polo B - Secondo Piano", "capacity": 35, "has_projector": True, "is_active": False},
-        ]
+        print("Caricamento dell'elenco ufficiale dei locali (data/aule_grassi.csv)...")
+        with open(DEFAULT_CSV, encoding="utf-8") as f:
+            result = apply_rooms(db, parse_rooms_csv(f.read()))
+        print(f"Creati {len(result.created)} locali con successo.")
 
-        created_rooms = []
-        for r in rooms_data:
-            room = models.Room(**r)
-            db.add(room)
-            created_rooms.append(room)
-
-        db.commit()
-        for r in created_rooms:
-            db.refresh(r)
-
-        print(f"Create {len(created_rooms)} aule con successo.")
+        rooms_by_code = {r.code: r for r in db.query(models.Room).all()}
+        created_rooms = [rooms_by_code[c] for c in ("A01", "B18", "I23", "G01")]
 
         # 2. Recupera il primo utente disponibile (es. il tuo utente Admin) per associarlo ai ticket
         reporter = db.query(models.User).first()
@@ -54,26 +44,34 @@ def seed_database():
             {
                 "title": "Proiettore HDMI non funzionante",
                 "description": "Il cavo HDMI a muro risulta danneggiato e il proiettore non riceve segnale dal laptop.",
-                "status": models.TicketStatus.IN_ATTESA,
+                "status": models.TicketStatus.APERTO,
+                "category": models.TicketCategory.INFORMATICO,
+                "priority": models.TicketPriority.ALTA,
                 "room_id": created_rooms[0].id,
             },
             {
                 "title": "Aria condizionata bloccata",
                 "description": "Il climatizzatore fa un rumore anomalo e la temperatura rimane troppo alta.",
-                "status": models.TicketStatus.IN_LAVORAZIONE,
+                "status": models.TicketStatus.IN_CARICO,
+                "category": models.TicketCategory.ELETTRICO,
+                "priority": models.TicketPriority.MEDIA,
                 "room_id": created_rooms[1].id,
             },
             {
                 "title": "Presa elettrica cattedra divelta",
                 "description": "La presa elettrica sulla cattedra principale necessita di sostituzione urgente.",
                 "status": models.TicketStatus.RISOLTO,
+                "category": models.TicketCategory.ELETTRICO,
+                "priority": models.TicketPriority.URGENTE,
                 "room_id": created_rooms[2].id,
             },
             {
                 "title": "Microfono wireless scarico/guasto",
-                "description": "Il microfono a gelato dell'aula non si accende anche dopo aver sostituito le batterie.",
-                "status": models.TicketStatus.IN_ATTESA,
-                "room_id": created_rooms[0].id,
+                "description": "Il microfono wireless dell'aula non si accende anche dopo aver sostituito le batterie.",
+                "status": models.TicketStatus.APERTO,
+                "category": models.TicketCategory.INFORMATICO,
+                "priority": models.TicketPriority.BASSA,
+                "room_id": created_rooms[3].id,
             },
         ]
 
@@ -84,7 +82,10 @@ def seed_database():
                 title=t["title"],
                 description=t["description"],
                 status=t["status"],
+                category=t["category"],
+                priority=t["priority"],
                 room_id=t["room_id"],
+                plesso=next(r.plesso for r in created_rooms if r.id == t["room_id"]),
                 reporter_id=reporter.id,
                 created_at=datetime.utcnow()
             )
