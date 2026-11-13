@@ -154,18 +154,25 @@ export default function Navbar() {
                 Accesso in corso...
               </span>
             ) : (
-              <div className="flex flex-col items-end gap-0.5">
-                <GoogleLogin
-                  onSuccess={handleGoogleSuccess}
-                  onError={() => alert("Login Fallito")}
-                  type="standard"
-                  theme="filled_black"
-                  size="small"
-                  shape="pill"
-                />
+              <div className="flex items-center gap-3">
                 {allowedDomain && (
-                  <span className="text-[10px] text-[var(--text-muted)]">Solo email @{allowedDomain}</span>
+                  <span className="hidden lg:block text-[11px] text-[var(--text-muted)] whitespace-nowrap">
+                    Solo email @{allowedDomain}
+                  </span>
                 )}
+                {/* color-scheme: light evita che il browser disegni un riquadro bianco
+                    intorno al pulsante di Google quando il sito è in tema scuro */}
+                <div style={{ colorScheme: "light" }} className="flex items-center">
+                  <GoogleLogin
+                    onSuccess={handleGoogleSuccess}
+                    onError={() => alert("Login Fallito")}
+                    type="standard"
+                    theme="filled_black"
+                    size="medium"
+                    shape="pill"
+                    text="signin_with"
+                  />
+                </div>
               </div>
             )}
           </div>
