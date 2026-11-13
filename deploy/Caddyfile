@@ -1,0 +1,14 @@
+# Caddy: unico punto di ingresso del sito su internet.
+# - ottiene e rinnova da solo il certificato HTTPS (Let's Encrypt) per il dominio in DOMINIO
+# - /api/... va al backend FastAPI, tutto il resto al frontend Next.js
+{$DOMINIO} {
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

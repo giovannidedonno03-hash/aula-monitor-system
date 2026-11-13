@@ -1,0 +1,72 @@
+# Configurazione per il server su internet (es. Webdock).
+# Uso:  docker compose -f docker-compose.prod.yml up -d --build
+# Le impostazioni (dominio, password, chiavi) stanno nel file .env accanto a questo file:
+# copiare .env.produzione.esempio in .env e compilarlo.
+#
+# Differenze rispetto a docker-compose.yml (sviluppo sul PC):
+# - il database NON e' raggiungibile da internet e ha una password vera
+# - backend e frontend non sono esposti direttamente: passa tutto da Caddy (HTTPS)
+# - il frontend gira in modalita' produzione (next build + next start)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Imposta POSTGRES_PASSWORD nel file .env}
+      POSTGRES_DB: aula_monitor_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aula_monitor_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://postgres:${POSTGRES_PASSWORD}@postgres:5432/aula_monitor_db
+      - SECRET_KEY=${SECRET_KEY:?Imposta SECRET_KEY nel file .env}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:?Imposta GOOGLE_CLIENT_ID nel file .env}
+      - ALLOWED_EMAIL_DOMAIN=${ALLOWED_EMAIL_DOMAIN-itisgrassi.edu.it}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        NEXT_PUBLIC_API_URL: https://${DOMINIO:?Imposta DOMINIO nel file .env}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      - DOMINIO=${DOMINIO}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

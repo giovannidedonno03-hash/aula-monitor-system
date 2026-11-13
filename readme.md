@@ -116,3 +116,7 @@ A01,aula,Grassi,si,no,Ufficio tecnico,,PC cattedra · Lim / Monitor Touch
 A23,non_assegnabile,Grassi,si,si,Ufficio tecnico,,Sedute per riunioni · Pc per proiezioni · Lavagna LIM
 G01,aula,Gianelli,no,no,,,
 ```
+
+## Pubblicazione su internet
+
+Per mettere il sito online su un server (es. Webdock) con HTTPS vedi [DEPLOY.md](DEPLOY.md).
