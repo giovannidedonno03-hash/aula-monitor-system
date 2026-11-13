@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import TicketDetailModal from "../components/TicketDetailModal";
 import UserAvatar from "../components/UserAvatar";
 import {
@@ -41,7 +41,9 @@ export default function TicketPage() {
 
 function TicketPageContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const view = searchParams.get("vista") === "assegnate" ? "assegnate" : "tutte";
+  const ticketToOpen = Number(searchParams.get("apri")) || null; // da una notifica: /ticket?apri=ID
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -103,6 +105,16 @@ function TicketPageContent() {
       setLoading(false);
     }
   }, []);
+
+  // Apertura diretta di un ticket (link dalle notifiche)
+  useEffect(() => {
+    if (ticketToOpen && tickets.some((t) => t.id === ticketToOpen)) setOpenTicketId(ticketToOpen);
+  }, [ticketToOpen, tickets]);
+
+  const closeTicket = () => {
+    setOpenTicketId(null);
+    if (ticketToOpen) router.replace(view === "assegnate" ? "/ticket?vista=assegnate" : "/ticket");
+  };
 
   const mine = useMemo(
     () => (user ? tickets.filter((t) => t.assignees.some((a) => a.id === user.id)) : []),
@@ -362,10 +374,10 @@ function TicketPageContent() {
         <TicketDetailModal
           ticket={openTicket}
           user={user}
-          onClose={() => setOpenTicketId(null)}
+          onClose={closeTicket}
           onChanged={(updated) => setTickets((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))}
           onDeleted={(id) => {
-            setOpenTicketId(null);
+            closeTicket();
             setTickets((prev) => prev.filter((t) => t.id !== id));
           }}
         />

@@ -10,8 +10,9 @@ import io
 from app.database import engine, Base, get_db
 import app.models as models
 import app.schemas as schemas
-from app.auth import verify_google_token, create_access_token, get_current_user, require_role
+from app.auth import verify_google_token, create_access_token, get_current_user, require_role, email_allowed, domain_error, ALLOWED_EMAIL_DOMAIN
 from app.room_import import parse_rooms_csv, apply_rooms
+from app.notifications import notify_status_change, notify_assigned, notify_mentions
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -98,12 +99,21 @@ def google_auth(auth_data: schemas.GoogleAuthSchema, db: Session = Depends(get_d
 
     if not email:
         raise HTTPException(status_code=400, detail="Impossibile estrarre l'email da Google.")
+    if not email_allowed(email) or id_info.get("email_verified") is False:
+        raise domain_error()
 
     user = db.query(models.User).filter(models.User.email == email).first()
     if not user:
-        # Il primo utente del sistema diventa SUPERVISORE, tutti gli altri UTENTE
-        is_first_user = db.query(models.User).count() == 0
-        role = models.UserRole.SUPERVISORE if is_first_user else models.UserRole.UTENTE
+        # Se non c'e' ancora nessun Supervisore con l'email della scuola, chi accede per primo
+        # lo diventa (cosi' attivando il blocco del dominio non si resta senza amministratore).
+        # Tutti gli altri nuovi utenti sono UTENTE.
+        has_school_supervisor = any(
+            email_allowed(u.email)
+            for u in db.query(models.User).filter(
+                models.User.role == models.UserRole.SUPERVISORE, models.User.is_active == True
+            ).all()
+        )
+        role = models.UserRole.UTENTE if has_school_supervisor else models.UserRole.SUPERVISORE
 
         user = models.User(
             email=email,
@@ -122,6 +132,11 @@ def google_auth(auth_data: schemas.GoogleAuthSchema, db: Session = Depends(get_d
         "token_type": "bearer",
         "user": user
     }
+
+# Configurazione pubblica del login (dominio email ammesso), usata dal pulsante di accesso
+@app.get("/api/v1/auth/config")
+def get_auth_config():
+    return {"allowed_domain": ALLOWED_EMAIL_DOMAIN or None}
 
 @app.get("/api/v1/auth/me", response_model=schemas.UserResponse)
 def get_me(current_user: models.User = Depends(get_current_user)):
@@ -155,6 +170,34 @@ def create_room(
     db.commit()
     db.refresh(db_room)
     return db_room
+
+# Modifica Aula: Solo SUPERVISORE
+@app.put("/api/v1/rooms/{room_id}", response_model=schemas.RoomResponse)
+def update_room(
+    room_id: int,
+    room_in: schemas.RoomCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role([models.UserRole.SUPERVISORE]))
+):
+    room = db.query(models.Room).filter(models.Room.id == room_id).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Aula non trovata.")
+    code = room_in.code.strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Il codice del locale e' obbligatorio.")
+    duplicate = db.query(models.Room).filter(models.Room.code == code, models.Room.id != room_id).first()
+    if duplicate:
+        raise HTTPException(status_code=400, detail=f"Un locale con il codice '{code}' esiste gia'.")
+
+    data = room_in.model_dump()
+    data["code"] = code
+    if not data["is_bookable"]:
+        data["free_schedule"] = False
+    for key, value in data.items():
+        setattr(room, key, value)
+    db.commit()
+    db.refresh(room)
+    return room
 
 # Attiva/Disattiva Aula: Solo SUPERVISORE
 @app.patch("/api/v1/rooms/{room_id}/toggle", response_model=schemas.RoomResponse)
@@ -247,6 +290,7 @@ def update_ticket_status(
         raise HTTPException(status_code=404, detail="Ticket non trovato.")
 
     new_status = status_update.status
+    old_status = ticket.status
     now = datetime.utcnow()
 
     if new_status == models.TicketStatus.APERTO:
@@ -274,6 +318,7 @@ def update_ticket_status(
 
     ticket.status = new_status
     ticket.updated_at = now
+    notify_status_change(db, ticket, old_status, current_user)
     db.commit()
     db.refresh(ticket)
     return ticket
@@ -302,8 +347,10 @@ def _staff_query(db: Session):
 def _set_assignees(db: Session, ticket: models.Ticket, user_ids: List[int], by: models.User):
     """Imposta gli assegnatari del ticket e aggiorna stato e date di conseguenza."""
     now = datetime.utcnow()
+    old_status = ticket.status
     wanted = list(dict.fromkeys(user_ids))  # senza duplicati, ordine mantenuto
     current = {a.user_id: a for a in ticket.assignments}
+    added = [uid for uid in wanted if uid not in current]
 
     for a in list(ticket.assignments):
         if a.user_id not in wanted:
@@ -323,6 +370,10 @@ def _set_assignees(db: Session, ticket: models.Ticket, user_ids: List[int], by: 
         ticket.status = models.TicketStatus.APERTO
         ticket.taken_at = None
     ticket.updated_at = now
+
+    # Notifiche: ai tecnici appena aggiunti e a chi ha aperto la segnalazione se cambia lo stato
+    notify_assigned(db, ticket, added, by)
+    notify_status_change(db, ticket, old_status, by)
 
 def _get_ticket_or_404(db: Session, ticket_id: int) -> models.Ticket:
     ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
@@ -428,6 +479,7 @@ def add_ticket_comment(
     comment = models.TicketComment(ticket_id=ticket.id, author_id=current_user.id, content=content)
     db.add(comment)
     ticket.updated_at = datetime.utcnow()
+    notify_mentions(db, ticket, content, current_user)
     db.commit()
     db.refresh(comment)
     return _comment_out(comment)
@@ -445,6 +497,45 @@ def delete_ticket_comment(
     if comment.author_id != current_user.id and current_user.role != models.UserRole.SUPERVISORE:
         raise HTTPException(status_code=403, detail="Puoi eliminare solo i tuoi commenti.")
     db.delete(comment)
+    db.commit()
+    return None
+
+
+# --- NOTIFICHE (campanella) ---
+
+@app.get("/api/v1/notifications", response_model=schemas.NotificationList)
+def get_my_notifications(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    q = db.query(models.Notification).filter(models.Notification.user_id == current_user.id)
+    unread = q.filter(models.Notification.is_read == False).count()  # noqa: E712
+    items = q.order_by(models.Notification.created_at.desc()).limit(30).all()
+    return {"unread": unread, "items": items}
+
+@app.post("/api/v1/notifications/{notification_id}/letta", status_code=status.HTTP_204_NO_CONTENT)
+def mark_notification_read(
+    notification_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    n = db.query(models.Notification).filter(
+        models.Notification.id == notification_id, models.Notification.user_id == current_user.id
+    ).first()
+    if not n:
+        raise HTTPException(status_code=404, detail="Notifica non trovata.")
+    n.is_read = True
+    db.commit()
+    return None
+
+@app.post("/api/v1/notifications/lette", status_code=status.HTTP_204_NO_CONTENT)
+def mark_all_notifications_read(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    db.query(models.Notification).filter(
+        models.Notification.user_id == current_user.id, models.Notification.is_read == False  # noqa: E712
+    ).update({models.Notification.is_read: True}, synchronize_session=False)
     db.commit()
     return None
 

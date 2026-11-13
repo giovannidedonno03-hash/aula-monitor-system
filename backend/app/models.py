@@ -196,6 +196,25 @@ class TicketComment(Base):
     ticket = relationship("Ticket", back_populates="comments")
     author = relationship("User")
 
+class NotificationType(str, enum.Enum):
+    MENZIONE = "MENZIONE"          # qualcuno ti ha taggato con @ in un commento
+    ASSEGNAZIONE = "ASSEGNAZIONE"  # ti e' stato assegnato un ticket
+    STATO = "STATO"                # e' cambiato lo stato di una tua segnalazione
+
+class Notification(Base):
+    """Notifica per un utente (campanella in alto)."""
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    type = Column(_text_enum(NotificationType), nullable=False)
+    title = Column(String, nullable=False)
+    message = Column(Text, nullable=False)
+    # Se il ticket viene eliminato, le sue notifiche spariscono con lui
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=True)
+    is_read = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
 class Booking(Base):
     """Prenotazione di un'aula: una riga per ogni ora (slot) prenotata.
     Le righe create con la stessa richiesta condividono lo stesso `code`."""

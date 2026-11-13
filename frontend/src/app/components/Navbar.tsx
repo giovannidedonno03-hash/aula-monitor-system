@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import { useTheme } from "next-themes";
 import UserAvatar from "./UserAvatar";
+import NotificationBell from "./NotificationBell";
 import { getApiBase, UserRole, roleInfo } from "../lib/constants";
 
 interface User {
@@ -50,8 +51,15 @@ function ThemeToggle() {
 export default function Navbar() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [allowedDomain, setAllowedDomain] = useState<string | null>(null);
 
   useEffect(() => {
+    // Dominio email ammesso al login (es. itisgrassi.edu.it), mostrato sotto il pulsante Google
+    fetch(`${getApiBase()}/auth/config`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((cfg) => setAllowedDomain(cfg?.allowed_domain ?? null))
+      .catch(() => {});
+
     const token = localStorage.getItem("token");
     if (token) {
       fetch(`${getApiBase()}/auth/me`, {
@@ -75,14 +83,17 @@ export default function Navbar() {
         body: JSON.stringify({ token: credentialResponse.credential }),
       });
 
-      if (!res.ok) throw new Error("Autenticazione fallita");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || "Errore durante il Login con Google");
+      }
 
       const data = await res.json();
       localStorage.setItem("token", data.access_token);
       setUser(data.user);
       window.location.reload();
-    } catch (err) {
-      alert("Errore durante il Login con Google");
+    } catch (err: any) {
+      alert(err.message || "Errore durante il Login con Google");
     } finally {
       setLoading(false);
     }
@@ -105,6 +116,8 @@ export default function Navbar() {
 
       <div className="flex items-center gap-4">
         <ThemeToggle />
+
+        {user && <NotificationBell />}
 
         {user ? (
           <div className="flex items-center gap-3">
@@ -141,14 +154,19 @@ export default function Navbar() {
                 Accesso in corso...
               </span>
             ) : (
-              <GoogleLogin
-                onSuccess={handleGoogleSuccess}
-                onError={() => alert("Login Fallito")}
-                type="standard"
-                theme="filled_black"
-                size="small"
-                shape="pill"
-              />
+              <div className="flex flex-col items-end gap-0.5">
+                <GoogleLogin
+                  onSuccess={handleGoogleSuccess}
+                  onError={() => alert("Login Fallito")}
+                  type="standard"
+                  theme="filled_black"
+                  size="small"
+                  shape="pill"
+                />
+                {allowedDomain && (
+                  <span className="text-[10px] text-[var(--text-muted)]">Solo email @{allowedDomain}</span>
+                )}
+              </div>
             )}
           </div>
         )}

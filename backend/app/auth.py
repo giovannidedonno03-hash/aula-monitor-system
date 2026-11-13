@@ -16,6 +16,21 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # Token valido per 24 ore
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 
+# Solo le email della scuola possono accedere. Lasciare vuoto per accettare qualsiasi account Google.
+ALLOWED_EMAIL_DOMAIN = os.getenv("ALLOWED_EMAIL_DOMAIN", "itisgrassi.edu.it").strip().lower().lstrip("@")
+
+def email_allowed(email: Optional[str]) -> bool:
+    """True se l'email appartiene al dominio della scuola (o se il blocco e' disattivato)."""
+    if not ALLOWED_EMAIL_DOMAIN:
+        return True
+    return bool(email) and email.strip().lower().endswith("@" + ALLOWED_EMAIL_DOMAIN)
+
+def domain_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"Accesso consentito solo con l'email della scuola (@{ALLOWED_EMAIL_DOMAIN}).",
+    )
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/auth/google", auto_error=False)
 
 def verify_google_token(token: str) -> dict:
@@ -56,6 +71,9 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.query(models.User).filter(models.User.email == email).first()
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="Utente non trovato o disattivato.")
+    # Anche le sessioni gia' aperte con email esterne alla scuola non sono piu' valide
+    if not email_allowed(user.email):
+        raise domain_error()
     return user
 
 def require_role(allowed_roles: list[models.UserRole]):

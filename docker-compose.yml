@@ -30,6 +30,8 @@ services:
       - DATABASE_URL=postgresql+psycopg2://postgres:postgres@monitor_db:5432/aula_monitor_db
       - SECRET_KEY=${SECRET_KEY:-supersecretkey_per_jwt_aula_monitor_2026}
       - GOOGLE_CLIENT_ID=284742808943-vu5gadhoreke8mkp44ucb0cm5b53vcqh.apps.googleusercontent.com
+      # Solo le email della scuola possono accedere (lasciare vuoto per accettare qualsiasi account Google)
+      - ALLOWED_EMAIL_DOMAIN=${ALLOWED_EMAIL_DOMAIN:-itisgrassi.edu.it}
     volumes:
       - ./backend:/app
     depends_on:

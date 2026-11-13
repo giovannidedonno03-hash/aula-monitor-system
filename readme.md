@@ -23,7 +23,7 @@ Il sistema usa gli stessi ruoli del gestionale dell'Ufficio Tecnico dell'IIS Gra
 4. ASSISTENTE_TECNICO: assistente tecnico (AT) di laboratorio.
 5. UTENTE: docente / personale; apre segnalazioni e prenota le aule.
 
-Il primo utente che accede diventa SUPERVISORE, tutti gli altri UTENTE. Responsabile Lab, Assistente Tecnico e Utente vedono solo le proprie segnalazioni.
+L'accesso è consentito solo con l'email della scuola (`@itisgrassi.edu.it`), impostata con la variabile `ALLOWED_EMAIL_DOMAIN` in `docker-compose.yml` (vuota = qualsiasi account Google). Se non esiste ancora un Supervisore con l'email della scuola, chi accede per primo lo diventa; tutti gli altri nuovi utenti sono UTENTE. Responsabile Lab, Assistente Tecnico e Utente vedono solo le proprie segnalazioni.
 
 Stati dei ticket: APERTO → IN CARICO → IN ESECUZIONE → INOLTRATO A FACTOTUM → RISOLTO.
 Ogni ticket ha plesso (Sede Principale / Gianelli), categoria e priorità (Bassa, Media, Alta, Urgente).
@@ -43,6 +43,8 @@ docker compose exec backend python import_aule.py              # anteprima, non 
 docker compose exec backend python import_aule.py --conferma   # applica
 ```
 
+Dalla pagina Aule il Supervisore può anche **modificare** un singolo locale (tipo, plesso, prenotabilità, responsabile, assistente tecnico, dotazioni).
+
 Il pulsante "Importa CSV" della pagina Aule accetta lo stesso formato (ad esempio `aule_esempio.csv` nella cartella principale, che contiene lo stesso elenco), ma aggiunge o aggiorna i locali senza eliminarne nessuno.
 
 ## Lavoro sui ticket (Ufficio Tecnico)
@@ -51,6 +53,13 @@ Cliccando su una segnalazione si apre il dettaglio, dove Supervisore e Manager p
 - cambiare lo stato (anche inoltro a FACTOTUM);
 - **prendere in carico** o **lasciare** il ticket; il Supervisore può assegnarlo a uno o più collaboratori;
 - scrivere **commenti interni** (visibili solo all'Ufficio Tecnico) taggando i colleghi con @Cognome.
+
+La **campanella** in alto avvisa quando:
+- qualcuno ti tagga con @Cognome in un commento interno;
+- un'altra persona ti assegna un ticket;
+- cambia lo stato di una segnalazione che hai aperto tu.
+
+Cliccando sulla notifica si apre direttamente il ticket.
 
 La vista **Assegnate a me** (`/ticket?vista=assegnate`) mostra i ticket del tecnico collegato.
 La pagina **Statistiche** (`/statistiche`) riporta tasso di risoluzione, tempi medi di presa in carico e risoluzione, carico per collaboratore, ripartizione per stato, categoria, priorità e plesso, e l'andamento degli ultimi 14 giorni.

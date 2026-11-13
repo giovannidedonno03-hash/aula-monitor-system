@@ -1,7 +1,7 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 from datetime import datetime, date as DateType
-from app.models import TicketStatus, UserRole, TicketPriority, TicketCategory, Plesso, RoomType
+from app.models import TicketStatus, UserRole, TicketPriority, TicketCategory, Plesso, RoomType, NotificationType
 
 # --- SCHEMI UTENTE ---
 class UserBase(BaseModel):
@@ -102,6 +102,21 @@ class CommentOut(BaseModel):
     created_at: datetime
 
 TicketResponse.model_rebuild()
+
+class NotificationOut(BaseModel):
+    id: int
+    type: NotificationType
+    title: str
+    message: str
+    ticket_id: Optional[int] = None
+    is_read: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class NotificationList(BaseModel):
+    unread: int
+    items: List[NotificationOut]
 
 # --- SCHEMI AULE ---
 class RoomBase(BaseModel):

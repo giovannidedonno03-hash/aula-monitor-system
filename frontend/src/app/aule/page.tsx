@@ -49,6 +49,7 @@ export default function AulePage() {
   // Finestra modale di creazione
   const [showModal, setShowModal] = useState<boolean>(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [editingId, setEditingId] = useState<number | null>(null); // null = nuovo locale
   const [submitting, setSubmitting] = useState(false);
 
   const supervisor = isSupervisor(user?.role);
@@ -125,13 +126,34 @@ export default function AulePage() {
     }
   };
 
-  // Creazione nuovo locale (Supervisore)
-  const handleCreateRoom = async (e: React.FormEvent) => {
+  const openCreate = () => {
+    setEditingId(null);
+    setForm(EMPTY_FORM);
+    setShowModal(true);
+  };
+
+  const openEdit = (a: Room) => {
+    setEditingId(a.id);
+    setForm({
+      code: a.code,
+      room_type: a.room_type,
+      plesso: a.plesso,
+      is_bookable: a.is_bookable,
+      free_schedule: a.free_schedule,
+      responsible: a.responsible || "",
+      technical_assistant: a.technical_assistant || "",
+      equipment: a.equipment || "",
+    });
+    setShowModal(true);
+  };
+
+  // Creazione o modifica di un locale (Supervisore)
+  const handleSaveRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const res = await fetch(`${getApiBase()}/rooms`, {
-        method: "POST",
+      const res = await fetch(editingId === null ? `${getApiBase()}/rooms` : `${getApiBase()}/rooms/${editingId}`, {
+        method: editingId === null ? "POST" : "PUT",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           ...form,
@@ -143,9 +165,10 @@ export default function AulePage() {
       });
       if (!res.ok) {
         const errData = await res.json();
-        throw new Error(errData.detail || "Errore nella creazione del locale.");
+        throw new Error(errData.detail || "Errore nel salvataggio del locale.");
       }
       setForm(EMPTY_FORM);
+      setEditingId(null);
       setShowModal(false);
       fetchAule();
     } catch (err: any) {
@@ -197,7 +220,7 @@ export default function AulePage() {
               <input type="file" accept=".csv" onChange={handleCsvUpload} className="hidden" />
             </label>
             <button
-              onClick={() => setShowModal(true)}
+              onClick={openCreate}
               className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition shadow-sm"
             >
               + Nuovo Locale
@@ -328,6 +351,12 @@ export default function AulePage() {
                       {supervisor && (
                         <td className="p-3 text-right whitespace-nowrap space-x-1.5">
                           <button
+                            onClick={() => openEdit(a)}
+                            className="px-2 py-1 text-[11px] bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 rounded transition"
+                          >
+                            Modifica
+                          </button>
+                          <button
                             onClick={() => handleToggleStatus(a.id)}
                             className="px-2 py-1 text-[11px] bg-[var(--bg-subtle)] hover:opacity-80 text-[var(--text-main)] rounded border border-[var(--border-color)] transition"
                           >
@@ -354,9 +383,11 @@ export default function AulePage() {
       {showModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-[var(--bg-card)] border border-[var(--border-color)] p-6 rounded-xl max-w-md w-full space-y-4 shadow-xl max-h-[90vh] overflow-y-auto">
-            <h3 className="text-base font-semibold text-[var(--text-main)]">Aggiungi Nuovo Locale</h3>
+            <h3 className="text-base font-semibold text-[var(--text-main)]">
+              {editingId === null ? "Aggiungi Nuovo Locale" : `Modifica locale ${form.code}`}
+            </h3>
 
-            <form onSubmit={handleCreateRoom} className="space-y-3">
+            <form onSubmit={handleSaveRoom} className="space-y-3">
               <div>
                 <label className="text-xs text-[var(--text-muted)] block mb-1">Codice (lettera piano + numero, es. B11)</label>
                 <input
@@ -442,7 +473,10 @@ export default function AulePage() {
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-[var(--border-color)]">
                 <button
                   type="button"
-                  onClick={() => setShowModal(false)}
+                  onClick={() => {
+                    setShowModal(false);
+                    setEditingId(null);
+                  }}
                   className="px-3 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-main)] transition"
                 >
                   Annulla
@@ -452,7 +486,7 @@ export default function AulePage() {
                   disabled={submitting}
                   className="px-4 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded transition disabled:opacity-50"
                 >
-                  {submitting ? "Salvataggio..." : "Salva Locale"}
+                  {submitting ? "Salvataggio..." : editingId === null ? "Salva Locale" : "Salva Modifiche"}
                 </button>
               </div>
             </form>

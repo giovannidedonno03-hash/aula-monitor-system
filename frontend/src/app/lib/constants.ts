@@ -183,6 +183,16 @@ export interface StaffUser {
   role: UserRole;
 }
 
+export interface AppNotification {
+  id: number;
+  type: "MENZIONE" | "ASSEGNAZIONE" | "STATO";
+  title: string;
+  message: string;
+  ticket_id: number | null;
+  is_read: boolean;
+  created_at: string;
+}
+
 export interface TicketComment {
   id: number;
   ticket_id: number;
