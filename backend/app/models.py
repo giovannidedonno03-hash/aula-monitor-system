@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, ForeignKey, Enum, Text, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, ForeignKey, Enum, Text
 from sqlalchemy.orm import relationship
 import enum
 from datetime import datetime
@@ -70,7 +70,7 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     tickets = relationship("Ticket", back_populates="reporter", foreign_keys="Ticket.reporter_id")
-    bookings = relationship("Booking", back_populates="user")
+    bookings = relationship("Booking", back_populates="user", foreign_keys="Booking.user_id")
 
 class Room(Base):
     """Locale della scuola. Il codice e' Lettera piano (A, B, C, I, G, R, P) + numero,
@@ -84,7 +84,9 @@ class Room(Base):
     is_bookable = Column(Boolean, default=False, nullable=False)      # prenotabile dal sito
     free_schedule = Column(Boolean, default=False, nullable=False)    # prenotabile anche fuori dall'orario scolastico
     responsible = Column(String, nullable=True)                       # "Ne risponde"
+    responsible_email = Column(String, nullable=True)                 # email del responsabile: puo' approvare le prenotazioni
     technical_assistant = Column(String, nullable=True)               # assistente tecnico (AT)
+    technical_assistant_email = Column(String, nullable=True)         # email dell'AT: vede le prenotazioni del locale
     equipment = Column(Text, nullable=True)                           # dotazioni, separate da " · "
     is_active = Column(Boolean, default=True)
 
@@ -200,6 +202,7 @@ class NotificationType(str, enum.Enum):
     MENZIONE = "MENZIONE"          # qualcuno ti ha taggato con @ in un commento
     ASSEGNAZIONE = "ASSEGNAZIONE"  # ti e' stato assegnato un ticket
     STATO = "STATO"                # e' cambiato lo stato di una tua segnalazione
+    PRENOTAZIONE = "PRENOTAZIONE"  # prenotazione da approvare, approvata o rifiutata
 
 class Notification(Base):
     """Notifica per un utente (campanella in alto)."""
@@ -212,26 +215,58 @@ class Notification(Base):
     message = Column(Text, nullable=False)
     # Se il ticket viene eliminato, le sue notifiche spariscono con lui
     ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=True)
+    link = Column(String, nullable=True)  # pagina da aprire cliccando (es. /prenotazioni/gestione)
     is_read = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
+class BookingStatus(str, enum.Enum):
+    APPROVATA = "APPROVATA"
+    IN_ATTESA = "IN_ATTESA"    # deve approvarla il responsabile del locale o l'Ufficio Tecnico
+    RIFIUTATA = "RIFIUTATA"
+
+# Prenotazioni che occupano il locale (quelle rifiutate lo liberano)
+ACTIVE_BOOKING_STATUSES = [BookingStatus.APPROVATA, BookingStatus.IN_ATTESA]
+
 class Booking(Base):
-    """Prenotazione di un'aula: una riga per ogni ora (slot) prenotata.
-    Le righe create con la stessa richiesta condividono lo stesso `code`."""
+    """Prenotazione di un locale.
+
+    - Ore scolastiche: una riga per ogni ora (slot 1..8).
+    - Orario libero (locali con free_schedule): una sola riga con slot vuoto e start_time/end_time.
+    Le righe della stessa richiesta condividono lo stesso `code` e vengono approvate o rifiutate insieme."""
     __tablename__ = "bookings"
-    __table_args__ = (
-        UniqueConstraint("room_id", "date", "slot", name="uq_booking_room_date_slot"),
-    )
 
     id = Column(Integer, primary_key=True, index=True)
     code = Column(String, index=True, nullable=False)
     date = Column(Date, nullable=False, index=True)
-    slot = Column(Integer, nullable=False)  # 1..8 (ora scolastica)
+    slot = Column(Integer, nullable=True)        # 1..8 (ora scolastica); vuoto se a orario libero
+    start_time = Column(String, nullable=True)   # "HH:MM", solo orario libero
+    end_time = Column(String, nullable=True)     # "HH:MM", solo orario libero
+    extras = Column(Text, nullable=True)         # richieste extra (JSON), es. microfoni, proiezione
     purpose = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    status = Column(_text_enum(BookingStatus), default=BookingStatus.APPROVATA, nullable=False)
+    status_reason = Column(String, nullable=True)   # perche' e' in attesa / note di approvazione
+    reject_reason = Column(String, nullable=True)
+    decided_at = Column(DateTime, nullable=True)
+    decided_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 
     room = relationship("Room", back_populates="bookings")
-    user = relationship("User", back_populates="bookings")
+    user = relationship("User", back_populates="bookings", foreign_keys=[user_id])
+    decided_by = relationship("User", foreign_keys=[decided_by_id])
+
+class ScheduleVersion(Base):
+    """Orario delle lezioni: per ogni locale, le ore occupate da lezioni (non prenotabili).
+    Si conservano le versioni caricate; ne e' attiva una alla volta."""
+    __tablename__ = "schedule_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    academic_year = Column(String, nullable=True)
+    data = Column(Text, nullable=False)  # JSON: {"A01": {"1": {"1": true, ...}, ...}, ...}
+    active = Column(Boolean, default=True, nullable=False)
+    uploaded_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)

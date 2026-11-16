@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict
-from typing import Optional, List
+from typing import Any, Dict, List, Optional
 from datetime import datetime, date as DateType
 from app.models import TicketStatus, UserRole, TicketPriority, TicketCategory, Plesso, RoomType, NotificationType
 
@@ -109,6 +109,7 @@ class NotificationOut(BaseModel):
     title: str
     message: str
     ticket_id: Optional[int] = None
+    link: Optional[str] = None
     is_read: bool
     created_at: datetime
 
@@ -126,7 +127,9 @@ class RoomBase(BaseModel):
     is_bookable: bool = False
     free_schedule: bool = False
     responsible: Optional[str] = None
+    responsible_email: Optional[str] = None
     technical_assistant: Optional[str] = None
+    technical_assistant_email: Optional[str] = None
     equipment: Optional[str] = None
 
 class RoomCreate(RoomBase):
@@ -143,7 +146,10 @@ class RoomResponse(RoomBase):
 class BookingCreate(BaseModel):
     room_id: int
     date: DateType
-    slots: List[int]  # ore scolastiche da 1 a 8
+    slots: List[int] = []                 # ore scolastiche da 1 a 8
+    start_time: Optional[str] = None      # "HH:MM", solo per i locali a orario libero
+    end_time: Optional[str] = None
+    extras: Optional[Dict[str, Any]] = None  # richieste extra (microfoni, proiezione, ...)
     purpose: str
 
 class BookingResponse(BaseModel):
@@ -155,6 +161,22 @@ class BookingResponse(BaseModel):
     user_name: str
     user_email: str
     date: DateType
-    slot: int
+    slot: Optional[int] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    extras: Optional[Dict[str, Any]] = None
     purpose: str
+    status: str
+    status_reason: Optional[str] = None
+    reject_reason: Optional[str] = None
+    decided_by_name: Optional[str] = None
+    decided_at: Optional[datetime] = None
     created_at: datetime
+
+class BookingDecision(BaseModel):
+    note: Optional[str] = None   # per l'approvazione (facoltativa) o motivo del rifiuto (obbligatorio)
+
+class ScheduleUpload(BaseModel):
+    name: str
+    academic_year: Optional[str] = None
+    rooms: Dict[str, Dict[str, Dict[str, bool]]]  # aula -> giorno 1-5 -> ora 1-8 -> c'e' lezione

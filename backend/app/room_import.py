@@ -53,18 +53,23 @@ def parse_rooms_csv(content: str) -> List[dict]:
         code = _text(row.get("codice") or row.get("locale") or row.get("code"))
         if not code:
             continue
-        rooms.append(
-            {
-                "code": code,
-                "room_type": _room_type(row.get("tipo")),
-                "plesso": _plesso(row.get("sede")),
-                "is_bookable": _yes(row.get("prenotabile")),
-                "free_schedule": _yes(row.get("orario_libero")),
-                "responsible": _text(row.get("responsabile")),
-                "technical_assistant": _text(row.get("assistente_tecnico")),
-                "equipment": _text(row.get("dotazioni")),
-            }
-        )
+        room = {
+            "code": code,
+            "room_type": _room_type(row.get("tipo")),
+            "plesso": _plesso(row.get("sede")),
+            "is_bookable": _yes(row.get("prenotabile")),
+            "free_schedule": _yes(row.get("orario_libero")),
+            "responsible": _text(row.get("responsabile")),
+            "technical_assistant": _text(row.get("assistente_tecnico")),
+            "equipment": _text(row.get("dotazioni")),
+        }
+        # Le email si aggiornano solo se il CSV ha quelle colonne
+        # (cosi' un import senza email non cancella quelle inserite dal sito)
+        if "responsabile_email" in row:
+            room["responsible_email"] = _text(row.get("responsabile_email"))
+        if "assistente_tecnico_email" in row:
+            room["technical_assistant_email"] = _text(row.get("assistente_tecnico_email"))
+        rooms.append(room)
     return rooms
 
 

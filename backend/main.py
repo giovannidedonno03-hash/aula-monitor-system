@@ -7,12 +7,14 @@ from sqlalchemy import text
 from pydantic import BaseModel
 import csv
 import io
-from app.database import engine, Base, get_db
+from app.database import engine, Base, get_db, SessionLocal
 import app.models as models
 import app.schemas as schemas
 from app.auth import verify_google_token, create_access_token, get_current_user, require_role, email_allowed, domain_error, ALLOWED_EMAIL_DOMAIN
 from app.room_import import parse_rooms_csv, apply_rooms
-from app.notifications import notify_status_change, notify_assigned, notify_mentions
+from app.notifications import notify, notify_status_change, notify_assigned, notify_mentions
+from app import bookings as booking_rules
+import json
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -78,6 +80,28 @@ with engine.begin() as conn:
           )
     """))
     conn.execute(text("UPDATE tickets SET assigned_to_id = NULL WHERE assigned_to_id IS NOT NULL"))
+
+    # 7. Prenotazioni con approvazione e orario libero; email di responsabile e AT sui locali
+    conn.execute(text("ALTER TABLE bookings DROP CONSTRAINT IF EXISTS uq_booking_room_date_slot"))
+    conn.execute(text("ALTER TABLE bookings ALTER COLUMN slot DROP NOT NULL"))
+    for ddl in (
+        "start_time VARCHAR(5)",
+        "end_time VARCHAR(5)",
+        "extras TEXT",
+        "status VARCHAR(30) NOT NULL DEFAULT 'APPROVATA'",
+        "status_reason VARCHAR",
+        "reject_reason VARCHAR",
+        "decided_at TIMESTAMP",
+        "decided_by_id INTEGER REFERENCES users(id)",
+    ):
+        conn.execute(text(f"ALTER TABLE bookings ADD COLUMN IF NOT EXISTS {ddl}"))
+    for ddl in ("responsible_email VARCHAR", "technical_assistant_email VARCHAR"):
+        conn.execute(text(f"ALTER TABLE rooms ADD COLUMN IF NOT EXISTS {ddl}"))
+    conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS link VARCHAR"))
+
+# Orario delle lezioni iniziale (data/orario_lezioni.json) al primo avvio
+with SessionLocal() as _db:
+    booking_rules.ensure_default_schedule(_db)
 
 app = FastAPI(title="Aula Monitor API")
 
@@ -763,11 +787,11 @@ async def upload_rooms_csv(
 
 
 # --- PRENOTAZIONE AULE ---
-# Accessibile a tutti gli utenti autenticati.
-# Ogni ora scolastica (slot 1..8) prenotata e' una riga nella tabella bookings;
-# le ore della stessa richiesta condividono lo stesso codice BK-XXXXXX.
+# Le regole (preavviso, approvazione automatica, anti-abuso, orario libero) sono in app/bookings.py.
+# Ore scolastiche: una riga per ogni ora; orario libero: una riga con start_time/end_time.
+# Le righe della stessa richiesta condividono il codice BK-XXXXXX.
 
-BOOKING_MIN_DAYS_AHEAD = 3  # oggi + 2 giorni di preavviso
+BOOKING_MIN_DAYS_AHEAD = booking_rules.MIN_DAYS_AHEAD
 
 def _booking_to_response(b: models.Booking) -> dict:
     return {
@@ -780,10 +804,22 @@ def _booking_to_response(b: models.Booking) -> dict:
         "user_email": b.user.email if b.user else "",
         "date": b.date,
         "slot": b.slot,
+        "start_time": b.start_time,
+        "end_time": b.end_time,
+        "extras": json.loads(b.extras) if b.extras else None,
         "purpose": b.purpose,
+        "status": b.status.value if b.status else "APPROVATA",
+        "status_reason": b.status_reason,
+        "reject_reason": b.reject_reason,
+        "decided_by_name": (b.decided_by.full_name or b.decided_by.email) if b.decided_by else None,
+        "decided_at": b.decided_at,
         "created_at": b.created_at,
     }
 
+def _sorted(q):
+    return q.order_by(models.Booking.date.asc(), models.Booking.slot.asc(), models.Booking.start_time.asc())
+
+# Prenotazioni che occupano un locale (griglia settimanale): approvate e in attesa
 @app.get("/api/v1/bookings", response_model=List[schemas.BookingResponse])
 def get_bookings(
     room_id: Optional[int] = None,
@@ -792,30 +828,27 @@ def get_bookings(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    q = db.query(models.Booking)
+    q = db.query(models.Booking).filter(models.Booking.status.in_(models.ACTIVE_BOOKING_STATUSES))
     if room_id is not None:
         q = q.filter(models.Booking.room_id == room_id)
     if date_from is not None:
         q = q.filter(models.Booking.date >= date_from)
     if date_to is not None:
         q = q.filter(models.Booking.date <= date_to)
-    bookings = q.order_by(models.Booking.date.asc(), models.Booking.slot.asc()).all()
-    return [_booking_to_response(b) for b in bookings]
+    return [_booking_to_response(b) for b in _sorted(q).all()]
 
+# Le mie prossime prenotazioni, anche quelle in attesa o rifiutate (per vederne il motivo)
 @app.get("/api/v1/bookings/mine", response_model=List[schemas.BookingResponse])
 def get_my_bookings(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    bookings = (
-        db.query(models.Booking)
-        .filter(models.Booking.user_id == current_user.id, models.Booking.date >= date.today())
-        .order_by(models.Booking.date.asc(), models.Booking.slot.asc())
-        .all()
+    q = db.query(models.Booking).filter(
+        models.Booking.user_id == current_user.id, models.Booking.date >= date.today()
     )
-    return [_booking_to_response(b) for b in bookings]
+    return [_booking_to_response(b) for b in _sorted(q).all()]
 
-@app.post("/api/v1/bookings", response_model=List[schemas.BookingResponse])
+@app.post("/api/v1/bookings")
 def create_booking(
     booking_in: schemas.BookingCreate,
     db: Session = Depends(get_db),
@@ -830,7 +863,6 @@ def create_booking(
         raise HTTPException(status_code=400, detail=f"Il locale {room.code} non e' prenotabile.")
 
     # Preavviso minimo: si prenota a partire da 3 giorni dopo oggi
-    # (es. il lunedi' si puo' prenotare da giovedi' in poi)
     min_date = date.today() + timedelta(days=BOOKING_MIN_DAYS_AHEAD)
     if booking_in.date < min_date:
         raise HTTPException(
@@ -839,49 +871,215 @@ def create_booking(
         )
     if booking_in.date.weekday() > 4:
         raise HTTPException(status_code=400, detail="Si possono prenotare solo giorni dal lunedi' al venerdi'.")
-
-    slots = sorted(set(booking_in.slots))
-    if not slots:
-        raise HTTPException(status_code=400, detail="Seleziona almeno un'ora.")
-    if any(s < 1 or s > 8 for s in slots):
-        raise HTTPException(status_code=400, detail="Le ore valide vanno dalla 1a all'8a.")
-    if not booking_in.purpose.strip():
+    purpose = booking_in.purpose.strip()
+    if not purpose:
         raise HTTPException(status_code=400, detail="Indica il motivo della prenotazione.")
 
-    occupied = (
-        db.query(models.Booking.slot)
-        .filter(
-            models.Booking.room_id == room.id,
-            models.Booking.date == booking_in.date,
-            models.Booking.slot.in_(slots),
-        )
-        .all()
-    )
-    if occupied:
-        ore = ", ".join(f"{s}a" for (s,) in sorted(occupied))
-        raise HTTPException(status_code=409, detail=f"Ore gia' prenotate per {room.code}: {ore}.")
+    slots = sorted(set(booking_in.slots))
+    start, end = booking_in.start_time, booking_in.end_time
+    if slots:
+        start = end = None
+        if any(s < 1 or s > 8 for s in slots):
+            raise HTTPException(status_code=400, detail="Le ore valide vanno dalla 1a all'8a.")
+    else:
+        if not (start or end):
+            raise HTTPException(status_code=400, detail="Seleziona almeno un'ora.")
+        if not room.free_schedule:
+            raise HTTPException(status_code=400, detail=f"Il locale {room.code} si prenota solo a ore scolastiche.")
+        if not (booking_rules.valid_time(start) and booking_rules.valid_time(end)) or start >= end:
+            raise HTTPException(status_code=400, detail="Orario non valido: indica un orario di inizio precedente a quello di fine.")
+
+    conflicts = booking_rules.find_conflicts(db, room, booking_in.date, slots, start, end)
+    if conflicts:
+        raise HTTPException(status_code=409, detail=f"{room.code} non e' libero: " + "; ".join(conflicts) + ".")
+
+    extras = None
+    if not slots and booking_in.extras:
+        chosen = {k: True for k, v in booking_in.extras.items() if v and k in booking_rules.EXTRA_LABELS}
+        extras = json.dumps(chosen) if chosen else None
+
+    reasons = booking_rules.approval_reasons(db, room, current_user, booking_in.date, start, end)
+    status_value = models.BookingStatus.IN_ATTESA if reasons else models.BookingStatus.APPROVATA
+    now = datetime.utcnow()
 
     code = f"BK-{uuid.uuid4().hex[:6].upper()}"
     created = []
-    for s in slots:
+    for s in (slots or [None]):
         b = models.Booking(
             code=code,
             date=booking_in.date,
             slot=s,
-            purpose=booking_in.purpose.strip(),
+            start_time=start,
+            end_time=end,
+            extras=extras,
+            purpose=purpose,
             room_id=room.id,
             user_id=current_user.id,
+            status=status_value,
+            status_reason="; ".join(reasons) if reasons else None,
+            decided_at=None if reasons else now,
         )
         db.add(b)
         created.append(b)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Una delle ore selezionate e' appena stata prenotata da un altro utente.")
+    db.flush()
+
+    when = booking_rules.describe_when(created)
+    who = current_user.full_name or current_user.email
+    if reasons:
+        # Richiesta da approvare: avvisa il responsabile del locale (o l'Ufficio Tecnico)
+        notify(
+            db,
+            [u.id for u in booking_rules.approvers_for(db, room)],
+            models.NotificationType.PRENOTAZIONE,
+            f"Prenotazione da approvare: {room.code}",
+            f"{who} chiede {room.code} per {when}: \"{purpose}\". Motivo: {'; '.join(reasons)}.",
+            actor=current_user,
+            link="/prenotazioni/gestione",
+        )
+    else:
+        # Prenotazione confermata: avvisa l'assistente tecnico del locale, se ha un account
+        at = booking_rules.user_by_email(db, room.technical_assistant_email)
+        if at is not None:
+            notify(
+                db,
+                [at.id],
+                models.NotificationType.PRENOTAZIONE,
+                f"Nuova prenotazione in {room.code}",
+                f"{who} ha prenotato {room.code} per {when}: \"{purpose}\".",
+                actor=current_user,
+                link="/prenotazioni/gestione",
+            )
+    db.commit()
     for b in created:
         db.refresh(b)
-    return [_booking_to_response(b) for b in created]
+    return {
+        "code": code,
+        "status": status_value.value,
+        "reasons": reasons,
+        "bookings": [_booking_to_response(b) for b in created],
+    }
+
+# Gestione prenotazioni: richieste da approvare e prossime prenotazioni dei propri locali
+@app.get("/api/v1/bookings/gestione")
+def get_bookings_management(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    staff = current_user.role in models.STAFF_ROLES
+    rooms = db.query(models.Room).all()
+    approve_ids = {r.id for r in rooms if booking_rules.can_approve(current_user, r)}
+    assistant_ids = {r.id for r in rooms if booking_rules.is_room_assistant(current_user, r)}
+    visible_ids = approve_ids | assistant_ids
+
+    upcoming_q = db.query(models.Booking).filter(
+        models.Booking.date >= date.today(),
+        models.Booking.status.in_(models.ACTIVE_BOOKING_STATUSES),
+    )
+    if not staff:
+        upcoming_q = upcoming_q.filter(models.Booking.room_id.in_(list(visible_ids) or [-1]))
+    upcoming = _sorted(upcoming_q).all()
+
+    return {
+        "is_staff": staff,
+        "can_approve": bool(approve_ids),
+        "responsible_rooms": sorted(r.code for r in rooms if r.id in approve_ids) if not staff else [],
+        "assistant_rooms": sorted(r.code for r in rooms if r.id in assistant_ids),
+        "pending": [_booking_to_response(b) for b in upcoming if b.status == models.BookingStatus.IN_ATTESA and b.room_id in approve_ids],
+        "upcoming": [_booking_to_response(b) for b in upcoming],
+    }
+
+def _decide_booking(db: Session, code: str, user: models.User, approve: bool, note: Optional[str]):
+    rows = db.query(models.Booking).filter(models.Booking.code == code).all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="Prenotazione non trovata.")
+    room = rows[0].room
+    if not booking_rules.can_approve(user, room):
+        raise HTTPException(status_code=403, detail=f"Solo il responsabile di {room.code} o l'Ufficio Tecnico possono decidere.")
+    if any(r.status != models.BookingStatus.IN_ATTESA for r in rows):
+        raise HTTPException(status_code=400, detail="Questa prenotazione non e' in attesa di approvazione.")
+    note = (note or "").strip()
+    if not approve and not note:
+        raise HTTPException(status_code=400, detail="Indica il motivo del rifiuto.")
+
+    now = datetime.utcnow()
+    for r in rows:
+        r.status = models.BookingStatus.APPROVATA if approve else models.BookingStatus.RIFIUTATA
+        r.decided_at = now
+        r.decided_by_id = user.id
+        if approve:
+            r.status_reason = f"Approvata da {user.full_name or user.email}" + (f": {note}" if note else "")
+        else:
+            r.reject_reason = note
+
+    when = booking_rules.describe_when(rows)
+    notify(
+        db,
+        [rows[0].user_id],
+        models.NotificationType.PRENOTAZIONE,
+        f"Prenotazione {'approvata' if approve else 'rifiutata'}: {room.code}",
+        f"La tua prenotazione di {room.code} per {when} e' stata {'approvata' if approve else 'rifiutata'}"
+        + (f". Motivo: {note}" if not approve else (f". Nota: {note}" if note else "")) + ".",
+        actor=user,
+        link="/prenotazioni",
+    )
+    db.commit()
+    return [_booking_to_response(r) for r in rows]
+
+@app.post("/api/v1/bookings/{code}/approva", response_model=List[schemas.BookingResponse])
+def approve_booking(
+    code: str,
+    data: schemas.BookingDecision,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    return _decide_booking(db, code, current_user, True, data.note)
+
+@app.post("/api/v1/bookings/{code}/rifiuta", response_model=List[schemas.BookingResponse])
+def reject_booking(
+    code: str,
+    data: schemas.BookingDecision,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    return _decide_booking(db, code, current_user, False, data.note)
+
+# --- ORARIO DELLE LEZIONI ---
+
+@app.get("/api/v1/orario")
+def get_lesson_schedule(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    sched = booking_rules.active_schedule(db)
+    if sched is None:
+        return {"name": None, "academic_year": None, "uploaded_at": None, "rooms": {}}
+    return {
+        "name": sched.name,
+        "academic_year": sched.academic_year,
+        "uploaded_at": sched.uploaded_at,
+        "rooms": json.loads(sched.data),
+    }
+
+# Carica un nuovo orario (formato di data/orario_lezioni.json) e lo rende attivo
+@app.post("/api/v1/orario")
+def upload_lesson_schedule(
+    data: schemas.ScheduleUpload,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role([models.UserRole.SUPERVISORE])),
+):
+    if not data.rooms:
+        raise HTTPException(status_code=400, detail="L'orario non contiene nessun locale.")
+    db.query(models.ScheduleVersion).update({models.ScheduleVersion.active: False})
+    version = models.ScheduleVersion(
+        name=data.name.strip() or "Orario delle lezioni",
+        academic_year=data.academic_year,
+        data=json.dumps(data.rooms),
+        active=True,
+        uploaded_by_id=current_user.id,
+    )
+    db.add(version)
+    db.commit()
+    return {"message": f"Orario \"{version.name}\" attivato ({len(data.rooms)} locali)."}
 
 @app.delete("/api/v1/bookings/{booking_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_booking(

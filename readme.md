@@ -64,6 +64,14 @@ Cliccando sulla notifica si apre direttamente il ticket.
 La vista **Assegnate a me** (`/ticket?vista=assegnate`) mostra i ticket del tecnico collegato.
 La pagina **Statistiche** (`/statistiche`) riporta tasso di risoluzione, tempi medi di presa in carico e risoluzione, carico per collaboratore, ripartizione per stato, categoria, priorità e plesso, e l'andamento degli ultimi 14 giorni.
 
+## Prenotazioni e approvazioni
+
+- Si prenota da oggi + 3 giorni; le ore in cui il locale ha lezione non sono prenotabili (orario delle lezioni in `backend/data/orario_lezioni.json`, caricato al primo avvio; un nuovo orario si carica con `POST /api/v1/orario`).
+- Le prenotazioni entro 30 giorni sono confermate subito. Restano **in attesa** di approvazione: date oltre 30 giorni, più di 10 giorni nello stesso locale in un mese (anti-abuso), eventi a orario libero fuori dalla fascia 08:00-17:30.
+- Approvano o rifiutano (con motivazione) l'Ufficio Tecnico e il **responsabile del locale**, cioè l'utente con l'email impostata come "Email del responsabile" nella scheda del locale. L'**assistente tecnico** (email nella scheda del locale) vede le prenotazioni dei suoi locali.
+- I locali con "orario libero" (es. sala riunioni, Auditorium) si prenotano anche con orario a scelta e richieste extra (microfoni, proiezione, gobbo, PC per votazioni, supporto tecnico).
+- Pagina **Gestione Prenotazioni** (`/prenotazioni/gestione`) per Ufficio Tecnico, Responsabili Lab e Assistenti Tecnici; notifiche nella campanella.
+
 ## Dashboard TV
 
 La pagina `/tv` mostra a schermo intero contatori, colonne per stato, carico dei tecnici e un ticker delle urgenze, con aggiornamento automatico ogni 30 secondi. È visibile a Supervisore e Manager; per un televisore senza login usare `http://localhost:3000/tv?kiosk=true`.

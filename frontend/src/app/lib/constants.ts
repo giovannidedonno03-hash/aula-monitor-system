@@ -130,7 +130,9 @@ export interface Room {
   is_bookable: boolean;
   free_schedule: boolean;
   responsible: string | null;
+  responsible_email: string | null;
   technical_assistant: string | null;
+  technical_assistant_email: string | null;
   equipment: string | null; // dotazioni separate da " · "
   is_active: boolean;
 }
@@ -140,6 +142,86 @@ export const splitEquipment = (e?: string | null) =>
     .split("·")
     .map((x) => x.trim())
     .filter(Boolean);
+
+// ---------------- PRENOTAZIONI ----------------
+// Orario scolastico (stesse fasce del gestionale IIS Grassi e del backend)
+export const SLOTS = [
+  { slot: 1, label: "1ª ora", start: "08:30", end: "09:20" },
+  { slot: 2, label: "2ª ora", start: "09:20", end: "10:10" },
+  { slot: 3, label: "3ª ora", start: "10:20", end: "11:10" },
+  { slot: 4, label: "4ª ora", start: "11:10", end: "12:00" },
+  { slot: 5, label: "5ª ora", start: "12:10", end: "13:00" },
+  { slot: 6, label: "6ª ora", start: "13:00", end: "13:50" },
+  { slot: 7, label: "7ª ora", start: "14:20", end: "15:10" },
+  { slot: 8, label: "8ª ora", start: "15:10", end: "16:00" },
+];
+
+export type BookingStatus = "APPROVATA" | "IN_ATTESA" | "RIFIUTATA";
+
+export const BOOKING_STATUSES: Record<BookingStatus, { label: string; badge: string }> = {
+  APPROVATA: { label: "Approvata", badge: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30" },
+  IN_ATTESA: { label: "In attesa", badge: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30" },
+  RIFIUTATA: { label: "Rifiutata", badge: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30" },
+};
+
+export const bookingStatusInfo = (s?: string | null) => BOOKING_STATUSES[(s as BookingStatus) || "APPROVATA"] ?? BOOKING_STATUSES.APPROVATA;
+
+// Richieste extra per gli eventi a orario libero (es. Auditorium)
+export const BOOKING_EXTRAS: { id: string; label: string }[] = [
+  { id: "microfoni", label: "Microfoni" },
+  { id: "proiezione", label: "Sistema di proiezione" },
+  { id: "gobbo", label: "Gobbo per relatori" },
+  { id: "pc_votazioni", label: "PC per votazioni" },
+  { id: "supporto_tecnico", label: "Supporto tecnico durante l'evento" },
+];
+
+export const extrasLabels = (extras?: Record<string, unknown> | null) =>
+  BOOKING_EXTRAS.filter((e) => extras && extras[e.id]).map((e) => e.label);
+
+export interface Booking {
+  id: number;
+  code: string;
+  room_id: number;
+  room_code: string;
+  user_id: number;
+  user_name: string;
+  user_email: string;
+  date: string; // YYYY-MM-DD
+  slot: number | null; // vuoto se a orario libero
+  start_time: string | null;
+  end_time: string | null;
+  extras: Record<string, boolean> | null;
+  purpose: string;
+  status: BookingStatus;
+  status_reason: string | null;
+  reject_reason: string | null;
+  decided_by_name: string | null;
+  decided_at: string | null;
+  created_at: string;
+}
+
+/** Raggruppa le righe con lo stesso codice (una richiesta = più ore) */
+export function groupBookings(rows: Booking[]): Booking[][] {
+  const groups = new Map<string, Booking[]>();
+  rows.forEach((b) => groups.set(b.code, [...(groups.get(b.code) || []), b]));
+  return Array.from(groups.values());
+}
+
+/** Es. "gio 19/11/2026 • ore 1ª, 2ª" oppure "lun 23/11/2026 • 18:00-21:00" */
+export function describeBooking(group: Booking[]): string {
+  const first = group[0];
+  const [y, m, d] = first.date.split("-").map(Number);
+  const day = new Date(y, m - 1, d).toLocaleDateString("it-IT", {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+  const slots = group.map((b) => b.slot).filter((s): s is number => !!s).sort((a, b) => a - b);
+  return slots.length > 0
+    ? `${day} • ore ${slots.map((s) => `${s}ª`).join(", ")}`
+    : `${day} • ${first.start_time}-${first.end_time}`;
+}
 
 // ---------------- TICKET ----------------
 export interface Ticket {
@@ -185,10 +267,11 @@ export interface StaffUser {
 
 export interface AppNotification {
   id: number;
-  type: "MENZIONE" | "ASSEGNAZIONE" | "STATO";
+  type: "MENZIONE" | "ASSEGNAZIONE" | "STATO" | "PRENOTAZIONE";
   title: string;
   message: string;
   ticket_id: number | null;
+  link: string | null; // pagina da aprire (es. /prenotazioni/gestione)
   is_read: boolean;
   created_at: string;
 }

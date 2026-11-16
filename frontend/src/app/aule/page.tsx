@@ -30,7 +30,9 @@ const EMPTY_FORM = {
   is_bookable: false,
   free_schedule: false,
   responsible: "",
+  responsible_email: "",
   technical_assistant: "",
+  technical_assistant_email: "",
   equipment: "",
 };
 
@@ -141,7 +143,9 @@ export default function AulePage() {
       is_bookable: a.is_bookable,
       free_schedule: a.free_schedule,
       responsible: a.responsible || "",
+      responsible_email: a.responsible_email || "",
       technical_assistant: a.technical_assistant || "",
+      technical_assistant_email: a.technical_assistant_email || "",
       equipment: a.equipment || "",
     });
     setShowModal(true);
@@ -158,7 +162,9 @@ export default function AulePage() {
         body: JSON.stringify({
           ...form,
           responsible: form.responsible.trim() || null,
+          responsible_email: form.responsible_email.trim().toLowerCase() || null,
           technical_assistant: form.technical_assistant.trim() || null,
+          technical_assistant_email: form.technical_assistant_email.trim().toLowerCase() || null,
           equipment: form.equipment.trim() || null,
           free_schedule: form.is_bookable && form.free_schedule,
         }),
@@ -317,9 +323,17 @@ export default function AulePage() {
                           <span className="text-[var(--text-muted)]">—</span>
                         )}
                       </td>
-                      <td className="p-3 whitespace-nowrap">{a.responsible || <span className="text-[var(--text-muted)]">—</span>}</td>
+                      <td className="p-3 whitespace-nowrap">
+                        {a.responsible || <span className="text-[var(--text-muted)]">—</span>}
+                        {a.responsible_email && (
+                          <span className="block text-[10px] font-mono text-[var(--text-muted)]">{a.responsible_email}</span>
+                        )}
+                      </td>
                       <td className="p-3 whitespace-nowrap">
                         {a.technical_assistant || <span className="text-[var(--text-muted)]">—</span>}
+                        {a.technical_assistant_email && (
+                          <span className="block text-[10px] font-mono text-[var(--text-muted)]">{a.technical_assistant_email}</span>
+                        )}
                       </td>
                       <td className="p-3 min-w-[220px]">
                         {splitEquipment(a.equipment).length === 0 ? (
@@ -450,11 +464,37 @@ export default function AulePage() {
               </div>
 
               <div>
+                <label className="text-xs text-[var(--text-muted)] block mb-1">
+                  Email del responsabile (può approvare le prenotazioni di questo locale)
+                </label>
+                <input
+                  type="email"
+                  placeholder="nome.cognome@itisgrassi.edu.it"
+                  value={form.responsible_email}
+                  onChange={(e) => setForm({ ...form, responsible_email: e.target.value })}
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
                 <label className="text-xs text-[var(--text-muted)] block mb-1">Assistente tecnico</label>
                 <input
                   type="text"
                   value={form.technical_assistant}
                   onChange={(e) => setForm({ ...form, technical_assistant: e.target.value })}
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-[var(--text-muted)] block mb-1">
+                  Email dell&apos;assistente tecnico (vede le prenotazioni di questo locale)
+                </label>
+                <input
+                  type="email"
+                  placeholder="nome.cognome@itisgrassi.edu.it"
+                  value={form.technical_assistant_email}
+                  onChange={(e) => setForm({ ...form, technical_assistant_email: e.target.value })}
                   className={inputClass}
                 />
               </div>

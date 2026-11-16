@@ -37,6 +37,7 @@ def notify(
     message: str,
     ticket: Optional[models.Ticket] = None,
     actor: Optional[models.User] = None,
+    link: Optional[str] = None,
 ) -> None:
     """Aggiunge una notifica per ciascun destinatario (senza commit)."""
     for uid in dict.fromkeys(user_ids):
@@ -49,6 +50,7 @@ def notify(
                 title=title,
                 message=message,
                 ticket_id=ticket.id if ticket is not None else None,
+                link=link,
             )
         )
 

@@ -10,6 +10,7 @@ const TYPE_STYLE: Record<string, { icon: string; color: string }> = {
   MENZIONE: { icon: "@", color: "bg-blue-500/15 text-blue-600 dark:text-blue-400" },
   ASSEGNAZIONE: { icon: "→", color: "bg-amber-500/15 text-amber-600 dark:text-amber-400" },
   STATO: { icon: "●", color: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" },
+  PRENOTAZIONE: { icon: "◷", color: "bg-purple-500/15 text-purple-600 dark:text-purple-400" },
 };
 
 function timeAgo(value: string): string {
@@ -71,6 +72,7 @@ export default function NotificationBell() {
     }
     setOpen(false);
     if (n.ticket_id) router.push(`/ticket?apri=${n.ticket_id}`);
+    else if (n.link) router.push(n.link);
   };
 
   const markAllRead = async () => {
