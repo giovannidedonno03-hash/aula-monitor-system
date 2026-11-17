@@ -61,6 +61,8 @@ La **campanella** in alto avvisa quando:
 
 Cliccando sulla notifica si apre direttamente il ticket.
 
+La **Bacheca Kanban** (`/kanban`, solo Ufficio Tecnico) mostra i ticket in colonne per stato: trascinando un cartellino in un'altra colonna se ne cambia lo stato (verso FACTOTUM viene chiesto il codice pratica); cliccandolo si apre il dettaglio per assegnarlo, commentarlo o eliminarlo. Filtri per plesso, priorità e "solo assegnati a me"; la colonna Risolto mostra di default gli ultimi 14 giorni.
+
 La vista **Assegnate a me** (`/ticket?vista=assegnate`) mostra i ticket del tecnico collegato.
 La pagina **Statistiche** (`/statistiche`) riporta tasso di risoluzione, tempi medi di presa in carico e risoluzione, carico per collaboratore, ripartizione per stato, categoria, priorità e plesso, e l'andamento degli ultimi 14 giorni.
 
