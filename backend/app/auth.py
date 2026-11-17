@@ -19,11 +19,21 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 # Solo le email della scuola possono accedere. Lasciare vuoto per accettare qualsiasi account Google.
 ALLOWED_EMAIL_DOMAIN = os.getenv("ALLOWED_EMAIL_DOMAIN", "itisgrassi.edu.it").strip().lower().lstrip("@")
 
+# Email ammesse anche se fuori dal dominio della scuola (es. account di prova), separate da virgola.
+# Si impostano nel file .env (che non va su GitHub): ALLOWED_EXTRA_EMAILS=nome@gmail.com,altro@gmail.com
+ALLOWED_EXTRA_EMAILS = {
+    e.strip().lower() for e in os.getenv("ALLOWED_EXTRA_EMAILS", "").split(",") if e.strip()
+}
+
 def email_allowed(email: Optional[str]) -> bool:
-    """True se l'email appartiene al dominio della scuola (o se il blocco e' disattivato)."""
+    """True se l'email appartiene al dominio della scuola, e' nella lista extra,
+    oppure se il blocco e' disattivato."""
     if not ALLOWED_EMAIL_DOMAIN:
         return True
-    return bool(email) and email.strip().lower().endswith("@" + ALLOWED_EMAIL_DOMAIN)
+    if not email:
+        return False
+    email = email.strip().lower()
+    return email.endswith("@" + ALLOWED_EMAIL_DOMAIN) or email in ALLOWED_EXTRA_EMAILS
 
 def domain_error() -> HTTPException:
     return HTTPException(

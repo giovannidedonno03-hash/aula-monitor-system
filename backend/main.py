@@ -14,6 +14,7 @@ from app.auth import verify_google_token, create_access_token, get_current_user,
 from app.room_import import parse_rooms_csv, apply_rooms
 from app.notifications import notify, notify_status_change, notify_assigned, notify_mentions
 from app import bookings as booking_rules
+from app import resources as resource_rules
 import json
 
 models.Base.metadata.create_all(bind=engine)
@@ -1042,6 +1043,223 @@ def reject_booking(
     current_user: models.User = Depends(get_current_user),
 ):
     return _decide_booking(db, code, current_user, False, data.note)
+
+# --- CARRELLI MOBILI (risorse prenotabili a quantita') ---
+
+def _resource_booking_out(b: models.ResourceBooking) -> dict:
+    return {
+        "id": b.id,
+        "code": b.code,
+        "resource_id": b.resource_id,
+        "resource_name": b.resource.name if b.resource else f"#{b.resource_id}",
+        "resource_total": b.resource.quantity if b.resource else 0,
+        "user_id": b.user_id,
+        "user_name": (b.user.full_name or b.user.email) if b.user else "",
+        "user_email": b.user.email if b.user else "",
+        "room_id": b.room_id,
+        "room_code": b.room.code if b.room else None,
+        "date": b.date,
+        "slot": b.slot,
+        "quantity": b.quantity,
+        "whole_cart": b.whole_cart,
+        "purpose": b.purpose,
+        "created_at": b.created_at,
+    }
+
+def _rb_sorted(q):
+    return q.order_by(models.ResourceBooking.date.asc(), models.ResourceBooking.slot.asc())
+
+def _get_resource_or_404(db: Session, resource_id: int) -> models.Resource:
+    r = db.query(models.Resource).filter(models.Resource.id == resource_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Carrello non trovato.")
+    return r
+
+@app.get("/api/v1/resources", response_model=List[schemas.ResourceResponse])
+def get_resources(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    return db.query(models.Resource).order_by(models.Resource.name.asc()).all()
+
+def _validate_resource(db: Session, data: schemas.ResourceBase, resource_id: Optional[int] = None):
+    name = data.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Il nome del carrello e' obbligatorio.")
+    if data.quantity < 1 or data.quantity > 200:
+        raise HTTPException(status_code=400, detail="Il numero di PC deve essere tra 1 e 200.")
+    q = db.query(models.Resource).filter(models.Resource.name == name)
+    if resource_id is not None:
+        q = q.filter(models.Resource.id != resource_id)
+    if q.first():
+        raise HTTPException(status_code=400, detail=f"Esiste gia' un carrello chiamato '{name}'.")
+    return name
+
+# Nuovo carrello: solo SUPERVISORE
+@app.post("/api/v1/resources", response_model=schemas.ResourceResponse)
+def create_resource(
+    data: schemas.ResourceBase,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role([models.UserRole.SUPERVISORE])),
+):
+    values = data.model_dump()
+    values["name"] = _validate_resource(db, data)
+    r = models.Resource(**values)
+    db.add(r)
+    db.commit()
+    db.refresh(r)
+    return r
+
+# Modifica carrello: solo SUPERVISORE
+@app.put("/api/v1/resources/{resource_id}", response_model=schemas.ResourceResponse)
+def update_resource(
+    resource_id: int,
+    data: schemas.ResourceBase,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role([models.UserRole.SUPERVISORE])),
+):
+    r = _get_resource_or_404(db, resource_id)
+    name = _validate_resource(db, data, resource_id)
+    booked = resource_rules.max_booked_per_slot(db, r.id, date.today())
+    if data.quantity < booked:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ci sono gia' prenotazioni di {booked} PC nella stessa ora: il carrello non puo' scendere sotto {booked}.",
+        )
+    for key, value in data.model_dump().items():
+        setattr(r, key, value)
+    r.name = name
+    db.commit()
+    db.refresh(r)
+    return r
+
+# Eliminazione carrello (con le sue prenotazioni): solo SUPERVISORE
+@app.delete("/api/v1/resources/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_resource(
+    resource_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role([models.UserRole.SUPERVISORE])),
+):
+    r = _get_resource_or_404(db, resource_id)
+    db.delete(r)
+    db.commit()
+    return None
+
+# Prenotazioni di un carrello in un periodo (per la griglia settimanale)
+@app.get("/api/v1/resource-bookings", response_model=List[schemas.ResourceBookingResponse])
+def get_resource_bookings(
+    resource_id: int,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    q = db.query(models.ResourceBooking).filter(models.ResourceBooking.resource_id == resource_id)
+    if date_from is not None:
+        q = q.filter(models.ResourceBooking.date >= date_from)
+    if date_to is not None:
+        q = q.filter(models.ResourceBooking.date <= date_to)
+    return [_resource_booking_out(b) for b in _rb_sorted(q).all()]
+
+@app.get("/api/v1/resource-bookings/mine", response_model=List[schemas.ResourceBookingResponse])
+def get_my_resource_bookings(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    q = db.query(models.ResourceBooking).filter(
+        models.ResourceBooking.user_id == current_user.id, models.ResourceBooking.date >= date.today()
+    )
+    return [_resource_booking_out(b) for b in _rb_sorted(q).all()]
+
+# Tutte le prossime prenotazioni dei carrelli (Ufficio Tecnico, per preparare e consegnare i carrelli)
+@app.get("/api/v1/resource-bookings/prossime", response_model=List[schemas.ResourceBookingResponse])
+def get_upcoming_resource_bookings(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role(models.STAFF_ROLES)),
+):
+    q = db.query(models.ResourceBooking).filter(models.ResourceBooking.date >= date.today())
+    return [_resource_booking_out(b) for b in _rb_sorted(q).all()]
+
+@app.post("/api/v1/resource-bookings", response_model=List[schemas.ResourceBookingResponse])
+def create_resource_booking(
+    data: schemas.ResourceBookingCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    resource = _get_resource_or_404(db, data.resource_id)
+    if not resource.is_active:
+        raise HTTPException(status_code=400, detail=f"{resource.name} non e' disponibile al momento.")
+
+    min_date = date.today() + timedelta(days=booking_rules.MIN_DAYS_AHEAD)
+    if data.date < min_date:
+        raise HTTPException(
+            status_code=400,
+            detail=f"I carrelli si prenotano con almeno 2 giorni di anticipo: prima data utile {min_date.strftime('%d/%m/%Y')}.",
+        )
+    if data.date.weekday() > 4:
+        raise HTTPException(status_code=400, detail="Si possono prenotare solo giorni dal lunedi' al venerdi'.")
+
+    slots = sorted(set(data.slots))
+    if not slots:
+        raise HTTPException(status_code=400, detail="Seleziona almeno un'ora.")
+    if any(s < 1 or s > 8 for s in slots):
+        raise HTTPException(status_code=400, detail="Le ore valide vanno dalla 1a all'8a.")
+    purpose = data.purpose.strip()
+    if not purpose:
+        raise HTTPException(status_code=400, detail="Indica il motivo della prenotazione.")
+
+    quantity = resource.quantity if data.whole_cart else (data.quantity or 0)
+    if quantity < 1 or quantity > resource.quantity:
+        raise HTTPException(status_code=400, detail=f"Indica un numero di PC tra 1 e {resource.quantity}.")
+
+    room = None
+    if data.room_id is not None:
+        room = db.query(models.Room).filter(models.Room.id == data.room_id).first()
+        if room is None:
+            raise HTTPException(status_code=404, detail="Aula di destinazione non trovata.")
+
+    problems = resource_rules.check_request(db, resource, data.date, slots, quantity, data.whole_cart)
+    if problems:
+        raise HTTPException(status_code=409, detail=f"{resource.name}: " + "; ".join(problems) + ".")
+
+    code = f"CR-{uuid.uuid4().hex[:6].upper()}"
+    created = []
+    for s in slots:
+        b = models.ResourceBooking(
+            code=code,
+            resource_id=resource.id,
+            user_id=current_user.id,
+            room_id=room.id if room else None,
+            date=data.date,
+            slot=s,
+            quantity=quantity,
+            whole_cart=data.whole_cart,
+            purpose=purpose,
+        )
+        db.add(b)
+        created.append(b)
+    db.commit()
+    for b in created:
+        db.refresh(b)
+    return [_resource_booking_out(b) for b in created]
+
+# Annulla una prenotazione (tutte le ore con lo stesso codice): chi l'ha fatta o l'Ufficio Tecnico
+@app.delete("/api/v1/resource-bookings/{code}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_resource_booking(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    rows = db.query(models.ResourceBooking).filter(models.ResourceBooking.code == code).all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="Prenotazione non trovata.")
+    if rows[0].user_id != current_user.id and current_user.role not in models.STAFF_ROLES:
+        raise HTTPException(status_code=403, detail="Puoi annullare solo le tue prenotazioni.")
+    for r in rows:
+        db.delete(r)
+    db.commit()
+    return None
+
 
 # --- ORARIO DELLE LEZIONI ---
 

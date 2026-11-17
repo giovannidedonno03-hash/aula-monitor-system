@@ -223,6 +223,36 @@ export function describeBooking(group: Booking[]): string {
     : `${day} • ${first.start_time}-${first.end_time}`;
 }
 
+// ---------------- CARRELLI MOBILI ----------------
+export interface Resource {
+  id: number;
+  name: string;
+  quantity: number; // numero di PC nel carrello
+  plesso: Plesso;
+  location: string | null;
+  description: string | null;
+  is_active: boolean;
+}
+
+export interface ResourceBooking {
+  id: number;
+  code: string;
+  resource_id: number;
+  resource_name: string;
+  resource_total: number;
+  user_id: number;
+  user_name: string;
+  user_email: string;
+  room_id: number | null;
+  room_code: string | null;
+  date: string; // YYYY-MM-DD
+  slot: number;
+  quantity: number;
+  whole_cart: boolean;
+  purpose: string;
+  created_at: string;
+}
+
 // ---------------- TICKET ----------------
 export interface Ticket {
   id: number;

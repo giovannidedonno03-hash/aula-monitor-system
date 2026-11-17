@@ -176,6 +176,46 @@ class BookingResponse(BaseModel):
 class BookingDecision(BaseModel):
     note: Optional[str] = None   # per l'approvazione (facoltativa) o motivo del rifiuto (obbligatorio)
 
+# --- SCHEMI CARRELLI MOBILI (risorse) ---
+class ResourceBase(BaseModel):
+    name: str
+    quantity: int
+    plesso: Plesso = Plesso.SEDE_PRINCIPALE
+    location: Optional[str] = None
+    description: Optional[str] = None
+    is_active: bool = True
+
+class ResourceResponse(ResourceBase):
+    id: int
+    model_config = ConfigDict(from_attributes=True)
+
+class ResourceBookingCreate(BaseModel):
+    resource_id: int
+    date: DateType
+    slots: List[int]                  # ore scolastiche 1..8
+    quantity: Optional[int] = None    # PC da prenotare (ignorato se whole_cart)
+    whole_cart: bool = False          # tutto il carrello
+    room_id: Optional[int] = None     # aula dove serve il carrello
+    purpose: str
+
+class ResourceBookingResponse(BaseModel):
+    id: int
+    code: str
+    resource_id: int
+    resource_name: str
+    resource_total: int
+    user_id: int
+    user_name: str
+    user_email: str
+    room_id: Optional[int] = None
+    room_code: Optional[str] = None
+    date: DateType
+    slot: int
+    quantity: int
+    whole_cart: bool
+    purpose: str
+    created_at: datetime
+
 class ScheduleUpload(BaseModel):
     name: str
     academic_year: Optional[str] = None

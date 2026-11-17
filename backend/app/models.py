@@ -258,6 +258,41 @@ class Booking(Base):
     user = relationship("User", back_populates="bookings", foreign_keys=[user_id])
     decided_by = relationship("User", foreign_keys=[decided_by_id])
 
+class Resource(Base):
+    """Risorsa prenotabile a quantita', es. un carrello mobile con N PC portatili."""
+    __tablename__ = "resources"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)        # es. "Carrello 1"
+    quantity = Column(Integer, nullable=False)                 # numero di PC nel carrello
+    plesso = Column(_text_enum(Plesso), default=Plesso.SEDE_PRINCIPALE, nullable=False)
+    location = Column(String, nullable=True)                   # dove si trova di solito (es. "Ufficio tecnico, piano terra")
+    description = Column(Text, nullable=True)                  # es. "PC Lenovo con Office e Arduino IDE"
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    bookings = relationship("ResourceBooking", back_populates="resource", cascade="all, delete-orphan")
+
+class ResourceBooking(Base):
+    """Prenotazione di alcuni PC (o di tutto il carrello) per un'ora scolastica.
+    Le righe della stessa richiesta (piu' ore dello stesso giorno) condividono il codice CR-XXXXXX."""
+    __tablename__ = "resource_bookings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, index=True, nullable=False)
+    resource_id = Column(Integer, ForeignKey("resources.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    room_id = Column(Integer, ForeignKey("rooms.id", ondelete="SET NULL"), nullable=True)  # aula dove portare il carrello
+    date = Column(Date, nullable=False, index=True)
+    slot = Column(Integer, nullable=False)       # 1..8
+    quantity = Column(Integer, nullable=False)   # PC prenotati
+    whole_cart = Column(Boolean, default=False, nullable=False)
+    purpose = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    resource = relationship("Resource", back_populates="bookings")
+    user = relationship("User", foreign_keys=[user_id])
+    room = relationship("Room")
+
 class ScheduleVersion(Base):
     """Orario delle lezioni: per ogni locale, le ore occupate da lezioni (non prenotabili).
     Si conservano le versioni caricate; ne e' attiva una alla volta."""

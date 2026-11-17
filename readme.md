@@ -72,6 +72,18 @@ La pagina **Statistiche** (`/statistiche`) riporta tasso di risoluzione, tempi m
 - I locali con "orario libero" (es. sala riunioni, Auditorium) si prenotano anche con orario a scelta e richieste extra (microfoni, proiezione, gobbo, PC per votazioni, supporto tecnico).
 - Pagina **Gestione Prenotazioni** (`/prenotazioni/gestione`) per Ufficio Tecnico, Responsabili Lab e Assistenti Tecnici; notifiche nella campanella.
 
+## Carrelli mobili (PC portatili)
+
+Pagina **Prenotazione Carrelli** (`/carrelli`):
+- il Supervisore crea i carrelli indicando quanti PC contengono, il plesso e dove si trovano;
+- chiunque può prenotare, per un giorno e una o più ore, **alcuni PC** oppure **tutto il carrello** (solo se in quelle ore nessuno ne ha già presi), indicando facoltativamente l'aula dove serve;
+- la griglia settimanale mostra quanti PC sono liberi in ogni ora; stesso preavviso delle aule (da oggi + 3 giorni);
+- l'Ufficio Tecnico vede tutte le prossime prenotazioni, per preparare e portare i carrelli.
+
+## Account di prova
+
+Oltre alle email `@itisgrassi.edu.it` si possono ammettere singoli indirizzi con `ALLOWED_EXTRA_EMAILS` nel file `.env` (separati da virgola), sia sul PC sia sul server. Il file `.env` non va su GitHub.
+
 ## Dashboard TV
 
 La pagina `/tv` mostra a schermo intero contatori, colonne per stato, carico dei tecnici e un ticker delle urgenze, con aggiornamento automatico ogni 30 secondi. È visibile a Supervisore e Manager; per un televisore senza login usare `http://localhost:3000/tv?kiosk=true`.

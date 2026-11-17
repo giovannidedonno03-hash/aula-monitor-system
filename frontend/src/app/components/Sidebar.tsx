@@ -32,6 +32,7 @@ export default function Sidebar() {
     { label: "Aule e Laboratori", href: "/aule" },
     { label: "Segnalazioni Ticket", href: "/ticket" },
     { label: "Prenotazione Aule", href: "/prenotazioni" },
+    { label: "Prenotazione Carrelli", href: "/carrelli" },
     // Approvazioni e prenotazioni dei propri locali (Ufficio Tecnico, Responsabili Lab, Assistenti Tecnici)
     ...(isStaff(user?.role) || user?.role === "RESPONSABILE_LAB" || user?.role === "ASSISTENTE_TECNICO"
       ? [{ label: "Gestione Prenotazioni", href: "/prenotazioni/gestione" }]

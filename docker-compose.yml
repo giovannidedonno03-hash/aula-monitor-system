@@ -32,6 +32,8 @@ services:
       - GOOGLE_CLIENT_ID=284742808943-vu5gadhoreke8mkp44ucb0cm5b53vcqh.apps.googleusercontent.com
       # Solo le email della scuola possono accedere (lasciare vuoto per accettare qualsiasi account Google)
       - ALLOWED_EMAIL_DOMAIN=${ALLOWED_EMAIL_DOMAIN:-itisgrassi.edu.it}
+      # Email ammesse in piu' (es. account di prova), dal file .env: ALLOWED_EXTRA_EMAILS=a@gmail.com,b@gmail.com
+      - ALLOWED_EXTRA_EMAILS=${ALLOWED_EXTRA_EMAILS:-}
     volumes:
       - ./backend:/app
     depends_on:
