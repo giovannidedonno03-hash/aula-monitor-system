@@ -61,6 +61,8 @@ La **campanella** in alto avvisa quando:
 
 Cliccando sulla notifica si apre direttamente il ticket.
 
+Nel dettaglio del ticket c'è la **Conversazione** tra chi ha segnalato e l'Ufficio Tecnico (es. "Non si avviano i programmi" → "Quale programma?" → "Office"): la vedono e la scrivono solo loro, con notifica a ogni messaggio. I **commenti interni** restano invece visibili solo all'Ufficio Tecnico.
+
 La **Bacheca Kanban** (`/kanban`, solo Ufficio Tecnico) mostra i ticket in colonne per stato: trascinando un cartellino in un'altra colonna se ne cambia lo stato (verso FACTOTUM viene chiesto il codice pratica); cliccandolo si apre il dettaglio per assegnarlo, commentarlo o eliminarlo. Filtri per plesso, priorità e "solo assegnati a me"; la colonna Risolto mostra di default gli ultimi 14 giorni.
 
 La vista **Assegnate a me** (`/ticket?vista=assegnate`) mostra i ticket del tecnico collegato.
@@ -82,15 +84,17 @@ Pagina **Prenotazione Carrelli** (`/carrelli`):
 - la griglia settimanale mostra quanti PC sono liberi in ogni ora; stesso preavviso delle aule (da oggi + 3 giorni);
 - l'Ufficio Tecnico vede tutte le prossime prenotazioni, per preparare e portare i carrelli.
 
+## Accesso
+
+Senza login non si vede nessuna pagina né dato della scuola: il sito mostra solo la schermata di accesso, e tutte le API richiedono il login tranne `POST /api/v1/auth/google` e `GET /api/v1/auth/config`.
+
 ## Account di prova
 
 Oltre alle email `@itisgrassi.edu.it` si possono ammettere singoli indirizzi con `ALLOWED_EXTRA_EMAILS` nel file `.env` (separati da virgola), sia sul PC sia sul server. Il file `.env` non va su GitHub.
 
 ## Dashboard TV
 
-La pagina `/tv` mostra a schermo intero contatori, colonne per stato, carico dei tecnici e un ticker delle urgenze, con aggiornamento automatico ogni 30 secondi. È visibile a Supervisore e Manager; per un televisore senza login usare `http://localhost:3000/tv?kiosk=true`.
-
----
+La pagina `/tv` mostra a schermo intero contatori, colonne per stato, carico dei tecnici e un ticker delle urgenze, con aggiornamento automatico ogni 30 secondi. È visibile all'Ufficio Tecnico dopo il login. Per un televisore senza login si imposta una chiave segreta `TV_KIOSK_KEY` nel file `.env` e si apre `https://DOMINIO/tv?kiosk=CHIAVE`: senza la chiave giusta il server non restituisce dati.
 
 ## Istruzioni per l'Avvio con Docker
 

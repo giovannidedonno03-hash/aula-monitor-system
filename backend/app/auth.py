@@ -86,6 +86,19 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise domain_error()
     return user
 
+# Chiave segreta per la Dashboard TV in modalita' kiosk (televisore senza login): /tv?kiosk=CHIAVE
+# Se vuota, la dashboard TV e' visibile solo all'Ufficio Tecnico dopo il login.
+TV_KIOSK_KEY = os.getenv("TV_KIOSK_KEY", "").strip()
+
+def get_optional_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> Optional[models.User]:
+    """Come get_current_user, ma restituisce None invece di dare errore se non c'e' un login valido."""
+    if not token:
+        return None
+    try:
+        return get_current_user(token, db)
+    except HTTPException:
+        return None
+
 def require_role(allowed_roles: list[models.UserRole]):
     """Dipendenza per la gestione dei Ruoli e Permessi (RBAC)."""
     def role_checker(current_user: models.User = Depends(get_current_user)):

@@ -11,6 +11,7 @@ const TYPE_STYLE: Record<string, { icon: string; color: string }> = {
   ASSEGNAZIONE: { icon: "→", color: "bg-amber-500/15 text-amber-600 dark:text-amber-400" },
   STATO: { icon: "●", color: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" },
   PRENOTAZIONE: { icon: "◷", color: "bg-purple-500/15 text-purple-600 dark:text-purple-400" },
+  MESSAGGIO: { icon: "✉", color: "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400" },
 };
 
 function timeAgo(value: string): string {

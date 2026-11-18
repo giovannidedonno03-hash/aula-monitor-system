@@ -118,3 +118,24 @@ def notify_mentions(db: Session, ticket: models.Ticket, text: str, actor: models
         ticket,
         actor,
     )
+
+
+def notify_message(db: Session, ticket: models.Ticket, author: models.User, text: str) -> None:
+    """Nuovo messaggio nella conversazione del ticket.
+    - se scrive chi ha segnalato: avvisa i tecnici assegnati (o tutto l'Ufficio Tecnico se non c'e' nessuno);
+    - se scrive l'Ufficio Tecnico: avvisa chi ha segnalato."""
+    preview = text if len(text) <= 120 else text[:117] + "..."
+    if author.id == ticket.reporter_id:
+        recipients = [a.user_id for a in ticket.assignments]
+        if not recipients:
+            recipients = [
+                u.id
+                for u in db.query(models.User)
+                .filter(models.User.is_active == True, models.User.role.in_(models.STAFF_ROLES))  # noqa: E712
+                .all()
+            ]
+        title = f"{_name(author)} ha risposto su {ticket.code}"
+    else:
+        recipients = [ticket.reporter_id]
+        title = f"L'Ufficio Tecnico ti ha scritto su {ticket.code}"
+    notify(db, recipients, models.NotificationType.MESSAGGIO, title, preview, ticket, author)

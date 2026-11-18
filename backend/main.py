@@ -1,4 +1,9 @@
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from collections import deque
+import os
+import time
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -10,9 +15,10 @@ import io
 from app.database import engine, Base, get_db, SessionLocal
 import app.models as models
 import app.schemas as schemas
-from app.auth import verify_google_token, create_access_token, get_current_user, require_role, email_allowed, domain_error, ALLOWED_EMAIL_DOMAIN
+from app.auth import verify_google_token, create_access_token, get_current_user, get_optional_user, require_role, email_allowed, domain_error, ALLOWED_EMAIL_DOMAIN, TV_KIOSK_KEY
+import hmac
 from app.room_import import parse_rooms_csv, apply_rooms
-from app.notifications import notify, notify_status_change, notify_assigned, notify_mentions
+from app.notifications import notify, notify_status_change, notify_assigned, notify_mentions, notify_message
 from app import bookings as booking_rules
 from app import resources as resource_rules
 import json
@@ -106,12 +112,95 @@ with SessionLocal() as _db:
 
 app = FastAPI(title="Aula Monitor API")
 
+# --- PROTEZIONI GENERALI ---
+
+# Errori di validazione (campo mancante, testo troppo lungo, ...) con un messaggio
+# leggibile in italiano invece della lista tecnica di Pydantic.
+FIELD_LABELS = {
+    "title": "Titolo", "description": "Descrizione", "content": "Testo", "purpose": "Motivo",
+    "note": "Nota", "factotum_code": "Codice FACTOTUM", "factotum_notes": "Note FACTOTUM",
+    "code": "Codice", "name": "Nome", "responsible": "Responsabile", "responsible_email": "Email responsabile",
+    "technical_assistant": "Assistente tecnico", "technical_assistant_email": "Email assistente tecnico",
+    "equipment": "Dotazioni", "location": "Posizione", "quantity": "Numero di PC", "slots": "Ore",
+    "extras": "Richieste extra", "user_ids": "Tecnici", "token": "Token",
+}
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError):
+    messages = []
+    for err in exc.errors():
+        field = str(err.get("loc", ["", ""])[-1])
+        label = FIELD_LABELS.get(field, field)
+        ctx = err.get("ctx") or {}
+        kind = err.get("type", "")
+        if kind == "string_too_long":
+            messages.append(f"{label}: massimo {ctx.get('max_length')} caratteri.")
+        elif kind == "string_too_short":
+            messages.append(f"{label}: campo obbligatorio.")
+        elif kind == "too_long":
+            messages.append(f"{label}: troppi elementi.")
+        elif kind == "missing":
+            messages.append(f"{label}: campo obbligatorio.")
+        else:
+            messages.append(f"{label}: valore non valido.")
+    return JSONResponse(status_code=422, content={"detail": " ".join(messages) or "Dati non validi."})
+
+# Limite al numero di richieste per indirizzo IP, in una finestra di 60 secondi.
+# In produzione l'IP e' quello reale del visitatore (Caddy lo passa e uvicorn usa --proxy-headers).
+# Il limite generale e' alto perche' tutta la scuola puo' uscire su internet con lo stesso IP.
+RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "1200"))
+LOGIN_LIMIT_PER_MINUTE = int(os.getenv("LOGIN_LIMIT_PER_MINUTE", "30"))
+MAX_BODY_BYTES = 2 * 1024 * 1024   # 2 MB: bastano per l'orario delle lezioni e il CSV dei locali
+_hits: dict[str, deque] = {}
+_hits_cleanup = [0.0]
+
+def _rate_limited(key: str, limit: int, now: float) -> bool:
+    q = _hits.setdefault(key, deque())
+    while q and q[0] <= now - 60:
+        q.popleft()
+    if len(q) >= limit:
+        return True
+    q.append(now)
+    return False
+
+@app.middleware("http")
+async def security_limits(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
+    # Corpo della richiesta troppo grande
+    length = request.headers.get("content-length")
+    if length and length.isdigit() and int(length) > MAX_BODY_BYTES:
+        return JSONResponse(status_code=413, content={"detail": "Richiesta troppo grande (massimo 2 MB)."})
+
+    now = time.monotonic()
+    if now - _hits_cleanup[0] > 300:   # ogni 5 minuti si dimenticano gli IP inattivi
+        for k in [k for k, q in _hits.items() if not q or q[-1] <= now - 60]:
+            del _hits[k]
+        _hits_cleanup[0] = now
+
+    ip = request.client.host if request.client else "sconosciuto"
+    limited = _rate_limited(f"all:{ip}", RATE_LIMIT_PER_MINUTE, now)
+    if not limited and request.url.path == "/api/v1/auth/google":
+        limited = _rate_limited(f"login:{ip}", LOGIN_LIMIT_PER_MINUTE, now)
+    if limited:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Troppe richieste: riprova tra un minuto."},
+            headers={"Retry-After": "60"},
+        )
+    return await call_next(request)
+
+# CORS: in produzione sito e API hanno lo stesso indirizzo, quindi basta ammettere il dominio
+# del sito (CORS_ORIGINS nel .env, separati da virgola). Vuoto = tutti (sviluppo sul PC e in rete locale).
+# Il login usa il token nell'header Authorization, non i cookie: allow_credentials non serve.
+CORS_ORIGINS = [o.strip().rstrip("/") for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=CORS_ORIGINS or ["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # --- AUTH ---
@@ -170,9 +259,9 @@ def get_me(current_user: models.User = Depends(get_current_user)):
 
 # --- ROOMS (AULE) ---
 
-# Lettura: Aperta a tutti
+# Lettura: solo utenti autenticati (la composizione della scuola non e' pubblica)
 @app.get("/api/v1/rooms", response_model=List[schemas.RoomResponse])
-def get_rooms(db: Session = Depends(get_db)):
+def get_rooms(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     return db.query(models.Room).order_by(models.Room.code.asc()).all()
 
 # Creazione Aula: Solo SUPERVISORE
@@ -467,6 +556,63 @@ def release_ticket(
     return ticket
 
 
+# --- CONVERSAZIONE CON CHI HA SEGNALATO ---
+# Visibile e scrivibile da chi ha aperto il ticket e dall'Ufficio Tecnico (Supervisore, Manager).
+
+MAX_TEXT = 4000  # lunghezza massima di un messaggio o commento
+
+def _can_talk(user: models.User, ticket: models.Ticket) -> bool:
+    return user.role in models.STAFF_ROLES or ticket.reporter_id == user.id
+
+def _message_out(m: models.TicketMessage) -> dict:
+    return {
+        "id": m.id,
+        "ticket_id": m.ticket_id,
+        "author_id": m.author_id,
+        "author_name": (m.author.full_name or m.author.email) if m.author else "",
+        "author_email": m.author.email if m.author else "",
+        "author_picture": m.author.picture if m.author else None,
+        "author_is_staff": bool(m.author and m.author.role in models.STAFF_ROLES and m.author_id != m.ticket.reporter_id),
+        "content": m.content,
+        "created_at": m.created_at,
+    }
+
+@app.get("/api/v1/tickets/{ticket_id}/messages", response_model=List[schemas.MessageOut])
+def get_ticket_messages(
+    ticket_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    ticket = _get_ticket_or_404(db, ticket_id)
+    if not _can_talk(current_user, ticket):
+        raise HTTPException(status_code=403, detail="Non puoi vedere questa conversazione.")
+    return [_message_out(m) for m in ticket.messages]
+
+@app.post("/api/v1/tickets/{ticket_id}/messages", response_model=schemas.MessageOut)
+def add_ticket_message(
+    ticket_id: int,
+    data: schemas.CommentCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    ticket = _get_ticket_or_404(db, ticket_id)
+    if not _can_talk(current_user, ticket):
+        raise HTTPException(status_code=403, detail="Non puoi scrivere in questa conversazione.")
+    content = data.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Il messaggio e' vuoto.")
+    if len(content) > MAX_TEXT:
+        raise HTTPException(status_code=400, detail=f"Il messaggio e' troppo lungo (massimo {MAX_TEXT} caratteri).")
+    msg = models.TicketMessage(ticket_id=ticket.id, author_id=current_user.id, content=content)
+    db.add(msg)
+    ticket.updated_at = datetime.utcnow()
+    db.flush()
+    notify_message(db, ticket, current_user, content)
+    db.commit()
+    db.refresh(msg)
+    return _message_out(msg)
+
+
 # --- COMMENTI INTERNI (solo Ufficio Tecnico) ---
 
 def _comment_out(c: models.TicketComment) -> dict:
@@ -501,6 +647,8 @@ def add_ticket_comment(
     content = data.content.strip()
     if not content:
         raise HTTPException(status_code=400, detail="Il commento e' vuoto.")
+    if len(content) > MAX_TEXT:
+        raise HTTPException(status_code=400, detail=f"Il commento e' troppo lungo (massimo {MAX_TEXT} caratteri).")
     comment = models.TicketComment(ticket_id=ticket.id, author_id=current_user.id, content=content)
     db.add(comment)
     ticket.updated_at = datetime.utcnow()
@@ -649,7 +797,7 @@ def get_stats(
 # --- DASHBOARD METRICS ---
 
 @app.get("/api/v1/dashboard/stats")
-def get_dashboard_stats(db: Session = Depends(get_db)):
+def get_dashboard_stats(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     S = models.TicketStatus
     total_rooms = db.query(models.Room).count()
     active_rooms = db.query(models.Room).filter(models.Room.is_active == True).count()
@@ -681,10 +829,17 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     }
 
 # --- DASHBOARD TV (Smart TV dell'Ufficio Tecnico) ---
-# Leggibile senza login, come la modalita' kiosk del gestionale Grassi,
-# cosi' il televisore puo' restare acceso sulla pagina /tv?kiosk=true.
+# Visibile all'Ufficio Tecnico dopo il login, oppure al televisore in modalita' kiosk
+# con la chiave segreta TV_KIOSK_KEY: /tv?kiosk=CHIAVE (la pagina la passa come ?key=).
 @app.get("/api/v1/tv")
-def get_tv_data(db: Session = Depends(get_db)):
+def get_tv_data(
+    key: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: Optional[models.User] = Depends(get_optional_user),
+):
+    kiosk_ok = bool(TV_KIOSK_KEY) and key is not None and hmac.compare_digest(key, TV_KIOSK_KEY)
+    if not kiosk_ok and (current_user is None or current_user.role not in models.STAFF_ROLES):
+        raise HTTPException(status_code=403, detail="Dashboard TV riservata all'Ufficio Tecnico (o chiave kiosk non valida).")
     week_ago = datetime.utcnow() - timedelta(days=7)
     tickets = (
         db.query(models.Ticket)
@@ -712,7 +867,7 @@ def get_tv_data(db: Session = Depends(get_db)):
     return {
         "tickets": [schemas.TicketResponse.model_validate(t) for t in tickets],
         "technicians": [
-            {"id": u.id, "name": u.full_name or u.email, "email": u.email, "picture": u.picture}
+            {"id": u.id, "name": u.full_name or u.email.split("@")[0], "picture": u.picture}
             for u in technicians
         ],
         "resolved_total": db.query(models.Ticket).filter(models.Ticket.status == models.TicketStatus.RISOLTO).count(),
@@ -768,7 +923,9 @@ async def upload_rooms_csv(
     if not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="Caricare esclusivamente file con estensione .csv")
 
-    content = await file.read()
+    content = await file.read(MAX_BODY_BYTES + 1)
+    if len(content) > MAX_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="File troppo grande (massimo 2 MB).")
     try:
         rooms = parse_rooms_csv(content.decode("utf-8"))
         if not rooms:
@@ -1098,7 +1255,7 @@ def _validate_resource(db: Session, data: schemas.ResourceBase, resource_id: Opt
 # Nuovo carrello: solo SUPERVISORE
 @app.post("/api/v1/resources", response_model=schemas.ResourceResponse)
 def create_resource(
-    data: schemas.ResourceBase,
+    data: schemas.ResourceCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role([models.UserRole.SUPERVISORE])),
 ):
@@ -1114,7 +1271,7 @@ def create_resource(
 @app.put("/api/v1/resources/{resource_id}", response_model=schemas.ResourceResponse)
 def update_resource(
     resource_id: int,
-    data: schemas.ResourceBase,
+    data: schemas.ResourceCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role([models.UserRole.SUPERVISORE])),
 ):

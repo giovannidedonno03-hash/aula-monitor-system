@@ -8,7 +8,7 @@ import { getApiBase, STATUSES, Ticket, categoryLabel, isStaff, parseServerDate, 
 interface Technician {
   id: number;
   name: string;
-  email: string;
+  email?: string; // non inviata dal server (privacy)
   picture: string | null;
 }
 
@@ -65,12 +65,15 @@ export default function TvDashboardPage() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">("checking");
   const [kiosk, setKiosk] = useState(false);
+  const [kioskKey, setKioskKey] = useState<string | null>(null);
 
-  // Accesso: modalità kiosk (/tv?kiosk=true, per il televisore) oppure utente dell'Ufficio Tecnico
+  // Accesso: modalità kiosk (/tv?kiosk=CHIAVE, per il televisore) oppure utente dell'Ufficio Tecnico.
+  // La chiave la controlla il server (variabile TV_KIOSK_KEY): se è sbagliata i dati non arrivano.
   useEffect(() => {
-    const isKiosk = new URLSearchParams(window.location.search).get("kiosk") === "true";
-    setKiosk(isKiosk);
-    if (isKiosk) {
+    const key = new URLSearchParams(window.location.search).get("kiosk");
+    if (key) {
+      setKiosk(true);
+      setKioskKey(key);
       setAccess("allowed");
       return;
     }
@@ -108,7 +111,13 @@ export default function TvDashboardPage() {
     if (access !== "allowed") return;
     const load = async () => {
       try {
-        const res = await fetch(`${getApiBase()}/tv`);
+        const token = localStorage.getItem("token");
+        const url = kioskKey ? `${getApiBase()}/tv?key=${encodeURIComponent(kioskKey)}` : `${getApiBase()}/tv`;
+        const res = await fetch(url, { headers: token && !kioskKey ? { Authorization: `Bearer ${token}` } : {} });
+        if (res.status === 403) {
+          setAccess("denied");
+          return;
+        }
         if (!res.ok) throw new Error("Errore nel caricamento dei dati.");
         setData(await res.json());
         setLastUpdate(new Date());
@@ -120,7 +129,7 @@ export default function TvDashboardPage() {
     load();
     const t = setInterval(load, REFRESH_MS);
     return () => clearInterval(t);
-  }, [access]);
+  }, [access, kioskKey]);
 
   const tickets = useMemo(() => data?.tickets ?? [], [data]);
 
@@ -158,7 +167,8 @@ export default function TvDashboardPage() {
           <h1 className="text-lg font-semibold text-[var(--text-main)]">Dashboard TV</h1>
           <p className="text-sm text-[var(--text-muted)]">
             Questa pagina è riservata all'Ufficio Tecnico (Supervisore e Manager). Per il televisore usa
-            l'indirizzo <span className="font-mono text-[var(--text-main)]">/tv?kiosk=true</span>.
+            l'indirizzo <span className="font-mono text-[var(--text-main)]">/tv?kiosk=CHIAVE</span> con la chiave segreta
+            impostata dall'amministratore (TV_KIOSK_KEY).
           </p>
           <Link href="/" className="inline-block text-sm text-blue-600 dark:text-blue-400 hover:underline">
             ← Torna al gestionale

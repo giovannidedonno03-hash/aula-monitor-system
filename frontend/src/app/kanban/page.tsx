@@ -309,6 +309,8 @@ export default function KanbanPage() {
                           </span>
                         )}
                         <span className="flex items-center gap-2 shrink-0">
+                          {t.awaiting_reporter && <span title="In attesa di risposta di chi ha segnalato">⏳</span>}
+                          {t.messages_count > 0 && <span title="Messaggi con chi ha segnalato">✉ {t.messages_count}</span>}
                           {t.comments_count > 0 && <span title="Commenti interni">💬 {t.comments_count}</span>}
                           <span title="Da quanto è stato inserito">{age(t.created_at)}</span>
                         </span>

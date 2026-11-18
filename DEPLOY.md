@@ -68,6 +68,10 @@ Nel file `.env` imposta:
 
 Salva con `Ctrl+O`, `Invio`, esci con `Ctrl+X`.
 
+Righe facoltative da aggiungere al `.env`:
+- `TV_KIOSK_KEY=` seguito da una chiave lunga (generala con `openssl rand -hex 16`): serve per lasciare la Dashboard TV accesa su un televisore senza login, all'indirizzo `https://DOMINIO/tv?kiosk=CHIAVE`;
+- `ALLOWED_EXTRA_EMAILS=` seguito da eventuali email di prova ammesse oltre a quelle della scuola, separate da virgola.
+
 ## 5. Autorizza il dominio su Google
 
 Nella [Google Cloud Console](https://console.cloud.google.com/apis/credentials), apri il
@@ -96,7 +100,7 @@ docker compose -f docker-compose.prod.yml exec backend python import_aule.py --c
 ```
 
 Apri `https://TUO-DOMINIO`: il primo account `@itisgrassi.edu.it` che accede diventa Supervisore.
-La Dashboard TV è su `https://TUO-DOMINIO/tv?kiosk=true`.
+La Dashboard TV è su `https://TUO-DOMINIO/tv` (dopo il login) oppure su `https://TUO-DOMINIO/tv?kiosk=CHIAVE` per il televisore.
 
 ## Aggiornare il sito dopo nuove modifiche
 

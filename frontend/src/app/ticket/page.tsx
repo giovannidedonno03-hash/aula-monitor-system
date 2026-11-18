@@ -81,7 +81,7 @@ function TicketPageContent() {
     try {
       const [resTickets, resRooms] = await Promise.all([
         fetch(`${getApiBase()}/tickets`, { headers: authHeaders() }),
-        fetch(`${getApiBase()}/rooms`),
+        fetch(`${getApiBase()}/rooms`, { headers: authHeaders() }),
       ]);
       if (resTickets.ok) setTickets(await resTickets.json());
       if (resRooms.ok) setRooms(await resRooms.json());
@@ -163,7 +163,10 @@ function TicketPageContent() {
         }),
       });
 
-      if (!res.ok) throw new Error("Errore durante la creazione del ticket.");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(typeof data.detail === "string" ? data.detail : "Errore durante la creazione del ticket.");
+      }
 
       setTitle("");
       setDescription("");
@@ -343,6 +346,13 @@ function TicketPageContent() {
 
                 <p className="text-xs text-[var(--text-muted)] line-clamp-2 leading-relaxed">{t.description}</p>
 
+                {/* L'Ufficio Tecnico ha fatto una domanda a chi ha segnalato */}
+                {t.awaiting_reporter && t.status !== "RISOLTO" && (
+                  <span className="self-start text-[10px] font-semibold px-2 py-0.5 rounded border bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border-cyan-500/30">
+                    {t.reporter_id === user?.id ? "L'Ufficio Tecnico ti ha scritto: rispondi" : "In attesa di risposta di chi ha segnalato"}
+                  </span>
+                )}
+
                 <div className="mt-auto pt-2.5 border-t border-[var(--border-color)] flex items-center justify-between gap-2 text-[11px] w-full">
                   <div className="flex items-center gap-1.5 min-w-0">
                     {t.assignees.length === 0 ? (
@@ -359,6 +369,7 @@ function TicketPageContent() {
                     )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0 text-[var(--text-muted)]">
+                    {t.messages_count > 0 && <span title="Messaggi con chi ha segnalato">✉ {t.messages_count}</span>}
                     {staff && t.comments_count > 0 && <span title="Commenti interni">💬 {t.comments_count}</span>}
                     <span>{formatDateTime(t.created_at)}</span>
                   </div>
@@ -449,6 +460,7 @@ function TicketPageContent() {
                   type="text"
                   required
                   placeholder="es. Proiettore spento, Luce rotta, Perdita rubinetto..."
+                  maxLength={150}
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   className={inputClass}
@@ -461,6 +473,7 @@ function TicketPageContent() {
                   required
                   rows={3}
                   placeholder="Descrivi brevemente il guasto riscontrato..."
+                  maxLength={4000}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   className={inputClass}

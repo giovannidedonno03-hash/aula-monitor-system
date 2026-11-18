@@ -116,6 +116,7 @@ function DecisionBox({ code, onDone }: { code: string; onDone: () => void }) {
         rows={2}
         autoFocus
         placeholder={mode === "rifiuta" ? "Motivo del rifiuto (obbligatorio), es. laboratorio in manutenzione" : "Nota per chi ha prenotato (facoltativa)"}
+        maxLength={1000}
         value={note}
         onChange={(e) => setNote(e.target.value)}
         className={inputClass}

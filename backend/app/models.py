@@ -133,6 +133,11 @@ class Ticket(Base):
         "TicketAssignee", back_populates="ticket", cascade="all, delete-orphan",
         order_by="TicketAssignee.assigned_at",
     )
+    # Conversazione con chi ha segnalato (visibile a lui e all'Ufficio Tecnico)
+    messages = relationship(
+        "TicketMessage", back_populates="ticket", cascade="all, delete-orphan",
+        order_by="TicketMessage.created_at",
+    )
     # Commenti interni dell'Ufficio Tecnico
     comments = relationship(
         "TicketComment", back_populates="ticket", cascade="all, delete-orphan",
@@ -163,6 +168,15 @@ class Ticket(Base):
         return len(self.comments)
 
     @property
+    def messages_count(self):
+        return len(self.messages)
+
+    @property
+    def awaiting_reporter(self):
+        """True se l'ultimo messaggio e' dell'Ufficio Tecnico (si aspetta la risposta di chi ha segnalato)."""
+        return bool(self.messages) and self.messages[-1].author_id != self.reporter_id
+
+    @property
     def reporter_name(self):
         if not self.reporter:
             return None
@@ -185,6 +199,20 @@ class TicketAssignee(Base):
     user = relationship("User", foreign_keys=[user_id])
     assigned_by = relationship("User", foreign_keys=[assigned_by_id])
 
+class TicketMessage(Base):
+    """Messaggio della conversazione tra chi ha segnalato e l'Ufficio Tecnico
+    (es. "Quale programma non si avvia?" -> "Office")."""
+    __tablename__ = "ticket_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True)
+    author_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    ticket = relationship("Ticket", back_populates="messages")
+    author = relationship("User")
+
 class TicketComment(Base):
     """Commento interno su un ticket, visibile solo all'Ufficio Tecnico."""
     __tablename__ = "ticket_comments"
@@ -203,6 +231,7 @@ class NotificationType(str, enum.Enum):
     ASSEGNAZIONE = "ASSEGNAZIONE"  # ti e' stato assegnato un ticket
     STATO = "STATO"                # e' cambiato lo stato di una tua segnalazione
     PRENOTAZIONE = "PRENOTAZIONE"  # prenotazione da approvare, approvata o rifiutata
+    MESSAGGIO = "MESSAGGIO"        # nuovo messaggio nella conversazione di un ticket
 
 class Notification(Base):
     """Notifica per un utente (campanella in alto)."""

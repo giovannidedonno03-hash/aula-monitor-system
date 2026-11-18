@@ -8,6 +8,7 @@ import {
   StaffUser,
   Ticket,
   TicketComment,
+  TicketMessage,
   TicketStatus,
   UserRole,
   categoryLabel,
@@ -72,6 +73,11 @@ export default function TicketDetailModal({ ticket, user, onClose, onChanged, on
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
   const [comments, setComments] = useState<TicketComment[]>([]);
   const [commentText, setCommentText] = useState("");
+  const [messages, setMessages] = useState<TicketMessage[]>([]);
+  const [messageText, setMessageText] = useState("");
+  const messagesEnd = useRef<HTMLDivElement>(null);
+  // Conversazione: la vedono chi ha segnalato e l'Ufficio Tecnico
+  const canTalk = staff || ticket.reporter_id === user.id;
   const [showFactotumForm, setShowFactotumForm] = useState(false);
   const [factotumCode, setFactotumCode] = useState("");
   const [factotumNotes, setFactotumNotes] = useState("");
@@ -90,6 +96,19 @@ export default function TicketDetailModal({ ticket, user, onClose, onChanged, on
       .then(setComments)
       .catch(() => {});
   }, [staff, ticket.id]);
+
+  // Conversazione con chi ha segnalato
+  useEffect(() => {
+    if (!canTalk) return;
+    fetch(`${getApiBase()}/tickets/${ticket.id}/messages`, { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setMessages)
+      .catch(() => {});
+  }, [canTalk, ticket.id]);
+
+  useEffect(() => {
+    messagesEnd.current?.scrollIntoView({ block: "nearest" });
+  }, [messages.length]);
 
   // Chiusura con il tasto Esc
   useEffect(() => {
@@ -163,6 +182,25 @@ export default function TicketDetailModal({ ticket, user, onClose, onChanged, on
       setComments((prev) => [...prev, c]);
       setCommentText("");
       onChanged({ ...ticket, comments_count: ticket.comments_count + 1 });
+    });
+  };
+
+  const sendMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!messageText.trim()) return;
+    run(async () => {
+      const msg = await call<TicketMessage>(`${getApiBase()}/tickets/${ticket.id}/messages`, {
+        method: "POST",
+        headers: authHeaders(true),
+        body: JSON.stringify({ content: messageText }),
+      });
+      setMessages((prev) => [...prev, msg]);
+      setMessageText("");
+      onChanged({
+        ...ticket,
+        messages_count: ticket.messages_count + 1,
+        awaiting_reporter: msg.author_id !== ticket.reporter_id,
+      });
     });
   };
 
@@ -389,6 +427,75 @@ export default function TicketDetailModal({ ticket, user, onClose, onChanged, on
             )}
           </section>
 
+          {/* Conversazione con chi ha segnalato */}
+          {canTalk && (
+            <section className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className={sectionTitle}>Conversazione</h3>
+                <span className="text-[10px] text-[var(--text-muted)]">
+                  {staff && ticket.reporter_id !== user.id
+                    ? `Visibile anche a ${ticket.reporter_name || "chi ha segnalato"}`
+                    : "Tra te e l'Ufficio Tecnico"}
+                </span>
+              </div>
+
+              {messages.length === 0 ? (
+                <p className="text-xs text-[var(--text-muted)] p-3 rounded-lg border border-dashed border-[var(--border-color)] text-center">
+                  {staff
+                    ? "Nessun messaggio. Scrivi a chi ha segnalato per chiedere dettagli (es. \"Quale programma non si avvia?\")."
+                    : "Nessun messaggio. Se l'Ufficio Tecnico ti chiede dettagli, lo vedrai qui e potrai rispondere."}
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {messages.map((m) => {
+                    const mine = m.author_id === user.id;
+                    return (
+                      <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                        <div
+                          className={`max-w-[85%] px-3 py-2 rounded-xl text-xs space-y-1 border ${
+                            mine
+                              ? "bg-blue-600/10 border-blue-500/30 rounded-br-sm"
+                              : "bg-[var(--bg-main)] border-[var(--border-color)] rounded-bl-sm"
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 text-[10px] text-[var(--text-muted)]">
+                            <span className="font-semibold text-[var(--text-main)]">{mine ? "Tu" : m.author_name}</span>
+                            {m.author_is_staff && (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-semibold">
+                                Ufficio Tecnico
+                              </span>
+                            )}
+                            <span>{formatDateTime(m.created_at)}</span>
+                          </div>
+                          <p className="text-[var(--text-main)] whitespace-pre-wrap break-words leading-relaxed">{m.content}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div ref={messagesEnd} />
+                </div>
+              )}
+
+              <form onSubmit={sendMessage} className="flex items-end gap-2">
+                <textarea
+                  rows={2}
+                  maxLength={4000}
+                  placeholder={staff ? "Scrivi a chi ha segnalato..." : "Rispondi all'Ufficio Tecnico..."}
+                  value={messageText}
+                  onChange={(e) => setMessageText(e.target.value)}
+                  className={inputClass}
+                />
+                <button
+                  type="submit"
+                  disabled={busy || !messageText.trim()}
+                  className="px-3 py-2 text-[11px] font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-md transition disabled:opacity-50 whitespace-nowrap"
+                >
+                  Invia
+                </button>
+              </form>
+            </section>
+          )}
+
           {/* Commenti interni */}
           {staff && (
             <section className="space-y-2">
@@ -449,6 +556,7 @@ export default function TicketDetailModal({ ticket, user, onClose, onChanged, on
                 <textarea
                   ref={commentBox}
                   rows={2}
+                  maxLength={4000}
                   placeholder="Scrivi un commento interno e tagga con @nome..."
                   value={commentText}
                   onChange={(e) => setCommentText(e.target.value)}

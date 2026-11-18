@@ -145,7 +145,7 @@ export default function PrenotazioniPage() {
       setAuthChecked(true);
     }
 
-    fetch(`${getApiBase()}/rooms`)
+    fetch(`${getApiBase()}/rooms`, { headers: authHeaders() })
       .then((res) => (res.ok ? res.json() : []))
       .then((data: Room[]) => {
         // Si possono prenotare solo i locali attivi e segnati come "prenotabili"
@@ -582,6 +582,7 @@ export default function PrenotazioniPage() {
                   type="text"
                   required
                   placeholder="es. Verifica di informatica 4B, Riunione di dipartimento..."
+                  maxLength={500}
                   value={purpose}
                   onChange={(e) => setPurpose(e.target.value)}
                   className={inputClass}

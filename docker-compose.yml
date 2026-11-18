@@ -34,6 +34,8 @@ services:
       - ALLOWED_EMAIL_DOMAIN=${ALLOWED_EMAIL_DOMAIN:-itisgrassi.edu.it}
       # Email ammesse in piu' (es. account di prova), dal file .env: ALLOWED_EXTRA_EMAILS=a@gmail.com,b@gmail.com
       - ALLOWED_EXTRA_EMAILS=${ALLOWED_EXTRA_EMAILS:-}
+      # Chiave segreta per la Dashboard TV senza login (/tv?kiosk=CHIAVE), dal file .env
+      - TV_KIOSK_KEY=${TV_KIOSK_KEY:-}
     volumes:
       - ./backend:/app
     depends_on:

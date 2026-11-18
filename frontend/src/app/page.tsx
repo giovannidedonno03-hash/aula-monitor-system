@@ -42,9 +42,11 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
+        const token = localStorage.getItem("token");
+        const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
         const [resStats, resRooms] = await Promise.all([
-          fetch(`${getApiBase()}/dashboard/stats`),
-          fetch(`${getApiBase()}/rooms`),
+          fetch(`${getApiBase()}/dashboard/stats`, { headers }),
+          fetch(`${getApiBase()}/rooms`, { headers }),
         ]);
 
         if (!resStats.ok) throw new Error("Errore nel caricamento delle statistiche.");

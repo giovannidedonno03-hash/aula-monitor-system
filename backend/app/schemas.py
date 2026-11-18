@@ -1,4 +1,5 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+import json
 from typing import Any, Dict, List, Optional
 from datetime import datetime, date as DateType
 from app.models import TicketStatus, UserRole, TicketPriority, TicketCategory, Plesso, RoomType, NotificationType
@@ -22,7 +23,7 @@ class UserResponse(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
 class GoogleAuthSchema(BaseModel):
-    token: str
+    token: str = Field(max_length=5000)
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -32,8 +33,8 @@ class TokenResponse(BaseModel):
 # --- SCHEMI TICKET ---
 class TicketCreate(BaseModel):
     room_id: int
-    title: str
-    description: str
+    title: str = Field(min_length=1, max_length=150)
+    description: str = Field(min_length=1, max_length=4000)
     plesso: Plesso = Plesso.SEDE_PRINCIPALE
     category: TicketCategory = TicketCategory.ALTRO
     priority: TicketPriority = TicketPriority.MEDIA
@@ -41,8 +42,8 @@ class TicketCreate(BaseModel):
 class TicketStatusUpdate(BaseModel):
     status: TicketStatus
     # Usati solo quando lo stato diventa INOLTRATO_FACTOTUM
-    factotum_code: Optional[str] = None
-    factotum_notes: Optional[str] = None
+    factotum_code: Optional[str] = Field(default=None, max_length=50)
+    factotum_notes: Optional[str] = Field(default=None, max_length=2000)
 
 class TicketResponse(BaseModel):
     id: int
@@ -62,6 +63,8 @@ class TicketResponse(BaseModel):
     assignees: List["AssigneeOut"] = []
     assigned_to_name: Optional[str] = None   # nomi dei tecnici separati da virgola
     comments_count: int = 0
+    messages_count: int = 0
+    awaiting_reporter: bool = False   # l'Ufficio Tecnico ha fatto una domanda e aspetta risposta
     taken_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
     factotum_code: Optional[str] = None
@@ -79,7 +82,7 @@ class AssigneeOut(BaseModel):
     assigned_at: Optional[datetime] = None
 
 class AssigneesUpdate(BaseModel):
-    user_ids: List[int]
+    user_ids: List[int] = Field(max_length=50)
 
 class StaffUserOut(BaseModel):
     id: int
@@ -89,7 +92,18 @@ class StaffUserOut(BaseModel):
     role: UserRole
 
 class CommentCreate(BaseModel):
+    content: str = Field(max_length=4000)
+
+class MessageOut(BaseModel):
+    id: int
+    ticket_id: int
+    author_id: int
+    author_name: str
+    author_email: str
+    author_picture: Optional[str] = None
+    author_is_staff: bool     # True = risposta dell'Ufficio Tecnico
     content: str
+    created_at: datetime
 
 class CommentOut(BaseModel):
     id: int
@@ -133,12 +147,17 @@ class RoomBase(BaseModel):
     equipment: Optional[str] = None
 
 class RoomCreate(RoomBase):
-    pass
+    # Limiti solo sui dati in ingresso (le risposte restano libere)
+    code: str = Field(min_length=1, max_length=60)
+    responsible: Optional[str] = Field(default=None, max_length=120)
+    responsible_email: Optional[str] = Field(default=None, max_length=254)
+    technical_assistant: Optional[str] = Field(default=None, max_length=120)
+    technical_assistant_email: Optional[str] = Field(default=None, max_length=254)
+    equipment: Optional[str] = Field(default=None, max_length=2000)
 
 class RoomResponse(RoomBase):
     id: int
     is_active: bool
-    tickets: List[TicketResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -146,11 +165,18 @@ class RoomResponse(RoomBase):
 class BookingCreate(BaseModel):
     room_id: int
     date: DateType
-    slots: List[int] = []                 # ore scolastiche da 1 a 8
-    start_time: Optional[str] = None      # "HH:MM", solo per i locali a orario libero
-    end_time: Optional[str] = None
-    extras: Optional[Dict[str, Any]] = None  # richieste extra (microfoni, proiezione, ...)
-    purpose: str
+    slots: List[int] = Field(default=[], max_length=8)   # ore scolastiche da 1 a 8
+    start_time: Optional[str] = Field(default=None, max_length=5)   # "HH:MM", solo per i locali a orario libero
+    end_time: Optional[str] = Field(default=None, max_length=5)
+    extras: Optional[Dict[str, Any]] = Field(default=None, max_length=20)  # richieste extra (microfoni, proiezione, ...)
+    purpose: str = Field(max_length=500)
+
+    @field_validator("extras")
+    @classmethod
+    def _extras_small(cls, v):
+        if v is not None and len(json.dumps(v)) > 2000:
+            raise ValueError("richieste extra troppo lunghe")
+        return v
 
 class BookingResponse(BaseModel):
     id: int
@@ -174,7 +200,7 @@ class BookingResponse(BaseModel):
     created_at: datetime
 
 class BookingDecision(BaseModel):
-    note: Optional[str] = None   # per l'approvazione (facoltativa) o motivo del rifiuto (obbligatorio)
+    note: Optional[str] = Field(default=None, max_length=1000)   # per l'approvazione (facoltativa) o motivo del rifiuto (obbligatorio)
 
 # --- SCHEMI CARRELLI MOBILI (risorse) ---
 class ResourceBase(BaseModel):
@@ -185,6 +211,13 @@ class ResourceBase(BaseModel):
     description: Optional[str] = None
     is_active: bool = True
 
+class ResourceCreate(ResourceBase):
+    # Limiti solo sui dati in ingresso
+    name: str = Field(min_length=1, max_length=100)
+    quantity: int = Field(ge=0, le=1000)
+    location: Optional[str] = Field(default=None, max_length=150)
+    description: Optional[str] = Field(default=None, max_length=1000)
+
 class ResourceResponse(ResourceBase):
     id: int
     model_config = ConfigDict(from_attributes=True)
@@ -192,11 +225,11 @@ class ResourceResponse(ResourceBase):
 class ResourceBookingCreate(BaseModel):
     resource_id: int
     date: DateType
-    slots: List[int]                  # ore scolastiche 1..8
+    slots: List[int] = Field(max_length=8)   # ore scolastiche 1..8
     quantity: Optional[int] = None    # PC da prenotare (ignorato se whole_cart)
     whole_cart: bool = False          # tutto il carrello
     room_id: Optional[int] = None     # aula dove serve il carrello
-    purpose: str
+    purpose: str = Field(max_length=500)
 
 class ResourceBookingResponse(BaseModel):
     id: int
@@ -217,6 +250,6 @@ class ResourceBookingResponse(BaseModel):
     created_at: datetime
 
 class ScheduleUpload(BaseModel):
-    name: str
-    academic_year: Optional[str] = None
+    name: str = Field(max_length=100)
+    academic_year: Optional[str] = Field(default=None, max_length=20)
     rooms: Dict[str, Dict[str, Dict[str, bool]]]  # aula -> giorno 1-5 -> ora 1-8 -> c'e' lezione

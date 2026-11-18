@@ -272,6 +272,8 @@ export interface Ticket {
   assignees: Assignee[];
   assigned_to_name: string | null; // nomi dei tecnici separati da virgola
   comments_count: number;
+  messages_count: number; // messaggi della conversazione con chi ha segnalato
+  awaiting_reporter: boolean; // l'Ufficio Tecnico ha scritto e aspetta una risposta
   taken_at: string | null;
   resolved_at: string | null;
   factotum_code: string | null;
@@ -297,12 +299,24 @@ export interface StaffUser {
 
 export interface AppNotification {
   id: number;
-  type: "MENZIONE" | "ASSEGNAZIONE" | "STATO" | "PRENOTAZIONE";
+  type: "MENZIONE" | "ASSEGNAZIONE" | "STATO" | "PRENOTAZIONE" | "MESSAGGIO";
   title: string;
   message: string;
   ticket_id: number | null;
   link: string | null; // pagina da aprire (es. /prenotazioni/gestione)
   is_read: boolean;
+  created_at: string;
+}
+
+export interface TicketMessage {
+  id: number;
+  ticket_id: number;
+  author_id: number;
+  author_name: string;
+  author_email: string;
+  author_picture: string | null;
+  author_is_staff: boolean; // risposta dell'Ufficio Tecnico
+  content: string;
   created_at: string;
 }
 

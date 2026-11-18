@@ -57,7 +57,7 @@ export default function AulePage() {
   const supervisor = isSupervisor(user?.role);
 
   const fetchAule = () => {
-    fetch(`${getApiBase()}/rooms`)
+    fetch(`${getApiBase()}/rooms`, { headers: authHeaders() })
       .then((res) => {
         if (!res.ok) throw new Error("Errore nel caricamento delle aule.");
         return res.json();

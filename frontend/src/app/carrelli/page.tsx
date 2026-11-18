@@ -128,7 +128,7 @@ export default function CarrelliPage() {
       .then(setUser)
       .finally(() => setAuthChecked(true));
     loadResources();
-    fetch(`${getApiBase()}/rooms`)
+    fetch(`${getApiBase()}/rooms`, { headers: headers() })
       .then((r) => (r.ok ? r.json() : []))
       .then((data: Room[]) => setRooms(data.filter((r) => r.is_active && (r.room_type === "AULA" || r.room_type === "AULA_PRIORITA" || r.room_type === "LAB" || r.room_type === "NON_ASSEGNABILE"))))
       .catch(() => {});
@@ -523,6 +523,7 @@ export default function CarrelliPage() {
                   type="text"
                   required
                   placeholder="es. Esercitazione di informatica 3A"
+                  maxLength={500}
                   value={purpose}
                   onChange={(e) => setPurpose(e.target.value)}
                   className={inputClass}

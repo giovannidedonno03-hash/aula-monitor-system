@@ -1,10 +1,33 @@
 # Caddy: unico punto di ingresso del sito su internet.
 # - ottiene e rinnova da solo il certificato HTTPS (Let's Encrypt) per il dominio in DOMINIO
 # - /api/... va al backend FastAPI, tutto il resto al frontend Next.js
+# - aggiunge le intestazioni di sicurezza a tutte le risposte
 {$DOMINIO} {
 	encode gzip
 
+	header {
+		# Il browser usa solo HTTPS per questo sito per un anno
+		Strict-Transport-Security "max-age=31536000"
+		# Il browser non deve "indovinare" il tipo dei file
+		X-Content-Type-Options "nosniff"
+		# Il sito non puo' essere caricato dentro un iframe di altri siti (clickjacking)
+		X-Frame-Options "DENY"
+		# Agli altri siti si comunica solo il dominio di provenienza, non l'indirizzo completo
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Funzioni del browser che il sito non usa
+		Permissions-Policy "geolocation=(), microphone=(), payment=(), usb=()"
+		# Da dove si possono caricare script, stili, immagini e frame:
+		# solo dal sito stesso e dal login di Google (pulsante e foto profilo)
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+		# Non rivela il software del server
+		-Server
+	}
+
 	handle /api/* {
+		# Richieste al backend al massimo di 2 MB (bastano per CSV dei locali e orario)
+		request_body {
+			max_size 2MB
+		}
 		reverse_proxy backend:8000
 	}
 
