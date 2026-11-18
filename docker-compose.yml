@@ -36,6 +36,8 @@ services:
       - ALLOWED_EXTRA_EMAILS=${ALLOWED_EXTRA_EMAILS:-}
       # Chiave segreta per la Dashboard TV senza login (/tv?kiosk=CHIAVE), dal file .env
       - TV_KIOSK_KEY=${TV_KIOSK_KEY:-}
+      # Su Windows Docker non vede le modifiche ai file: il backend le controlla a intervalli
+      - WATCHFILES_FORCE_POLLING=true
     volumes:
       - ./backend:/app
     depends_on:
@@ -53,6 +55,8 @@ services:
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
       - NEXT_PUBLIC_GOOGLE_CLIENT_ID=284742808943-vu5gadhoreke8mkp44ucb0cm5b53vcqh.apps.googleusercontent.com
+      # Su Windows Docker non vede le modifiche ai file: Next.js le controlla a intervalli
+      - WATCHPACK_POLLING=true
     volumes:
       - ./frontend:/app
       - /app/node_modules

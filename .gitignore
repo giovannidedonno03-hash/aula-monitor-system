@@ -1,6 +1,8 @@
 node_modules/
 .next/
 __pycache__/
+# Foto allegate ai ticket durante le prove sul PC
+backend/uploads/
 *.pyc
 .env
 .DS_Store
@@ -14,5 +16,5 @@ gestione-ufficio-tecnico---iis-grassi/
 # Messaggio di commit preparato
 messaggio_commit.txt
 
-# File scaricati dalla chat con Claude (app desktop)
-Claude outputs/
+# Cartelle di file scaricati in locale
+*outputs/

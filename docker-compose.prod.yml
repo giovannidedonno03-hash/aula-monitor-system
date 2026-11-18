@@ -38,6 +38,10 @@ services:
       # Le API accettano chiamate dal browser solo dal sito stesso
       - CORS_ORIGINS=https://${DOMINIO}
       - TV_KIOSK_KEY=${TV_KIOSK_KEY:-}
+      - UPLOAD_DIR=/data/uploads
+    volumes:
+      # Foto allegate ai ticket: restano anche quando il backend viene ricostruito
+      - uploads_data:/data/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -72,5 +76,6 @@ services:
 
 volumes:
   postgres_data:
+  uploads_data:
   caddy_data:
   caddy_config:

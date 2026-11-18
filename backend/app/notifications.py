@@ -3,7 +3,9 @@
 Si creano notifiche quando:
 - qualcuno ti tagga con @Cognome in un commento interno (MENZIONE);
 - ti viene assegnato un ticket da un'altra persona (ASSEGNAZIONE);
-- cambia lo stato di una segnalazione che hai aperto tu (STATO).
+- cambia lo stato di una segnalazione che hai aperto tu (STATO);
+- arriva un messaggio nella conversazione di un ticket (MESSAGGIO);
+- qualcuno risponde a un tuo messaggio o commento (RISPOSTA).
 Chi compie l'azione non riceve mai la notifica di se stesso.
 """
 
@@ -106,7 +108,8 @@ def find_mentioned(db: Session, text: str) -> list:
     return found
 
 
-def notify_mentions(db: Session, ticket: models.Ticket, text: str, actor: models.User) -> None:
+def notify_mentions(db: Session, ticket: models.Ticket, text: str, actor: models.User) -> list:
+    """Notifica i colleghi taggati; restituisce gli id notificati."""
     mentioned = find_mentioned(db, text)
     preview = text if len(text) <= 120 else text[:117] + "..."
     notify(
@@ -118,9 +121,10 @@ def notify_mentions(db: Session, ticket: models.Ticket, text: str, actor: models
         ticket,
         actor,
     )
+    return [u.id for u in mentioned]
 
 
-def notify_message(db: Session, ticket: models.Ticket, author: models.User, text: str) -> None:
+def notify_message(db: Session, ticket: models.Ticket, author: models.User, text: str) -> list:
     """Nuovo messaggio nella conversazione del ticket.
     - se scrive chi ha segnalato: avvisa i tecnici assegnati (o tutto l'Ufficio Tecnico se non c'e' nessuno);
     - se scrive l'Ufficio Tecnico: avvisa chi ha segnalato."""
@@ -139,3 +143,24 @@ def notify_message(db: Session, ticket: models.Ticket, author: models.User, text
         recipients = [ticket.reporter_id]
         title = f"L'Ufficio Tecnico ti ha scritto su {ticket.code}"
     notify(db, recipients, models.NotificationType.MESSAGGIO, title, preview, ticket, author)
+    return recipients
+
+
+def notify_reply(
+    db: Session, ticket: models.Ticket, author: models.User, text: str,
+    replied_author_id: Optional[int], already_notified: Iterable[int],
+) -> None:
+    """Avvisa chi ha scritto il messaggio/commento a cui si e' risposto
+    (se non e' chi risponde e non ha gia' ricevuto un'altra notifica per lo stesso testo)."""
+    if replied_author_id is None or replied_author_id == author.id or replied_author_id in set(already_notified):
+        return
+    preview = text if len(text) <= 120 else text[:117] + "..."
+    notify(
+        db,
+        [replied_author_id],
+        models.NotificationType.RISPOSTA,
+        f"{_name(author)} ha risposto al tuo messaggio su {ticket.code}",
+        preview,
+        ticket,
+        author,
+    )

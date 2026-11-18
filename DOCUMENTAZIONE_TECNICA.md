@@ -129,7 +129,8 @@ Gli studenti non hanno accesso. Possono entrare solo account Google `@itisgrassi
 | Cambiare stato, prendere/lasciare in carico, inoltrare a FACTOTUM | ✔ | ✔ | — |
 | Assegnare un ticket a uno o più tecnici | ✔ | — | — |
 | Commenti interni | ✔ | ✔ | — |
-| Conversazione sul ticket | ✔ | ✔ | solo sui propri ticket |
+| Conversazione sul ticket e foto allegate | ✔ | ✔ | solo sui propri ticket |
+| Eliminare una foto | ✔ (tutte) | solo le proprie | solo le proprie |
 | Eliminare un ticket | ✔ (tutti) | solo i propri | solo i propri |
 | Prenotare aule e carrelli, annullare le proprie prenotazioni | ✔ | ✔ | ✔ |
 | Approvare / rifiutare prenotazioni di aule | ✔ (tutti i locali) | ✔ (tutti i locali) | solo il responsabile del locale (email impostata nella scheda del locale) |
@@ -148,6 +149,8 @@ Gli studenti non hanno accesso. Possono entrare solo account Google `@itisgrassi
 - Assegnazione a più tecnici da parte del Supervisore; "Prendi in carico / Lascia" per i tecnici. Un ticket aperto che riceve un tecnico passa automaticamente In Carico.
 - **Conversazione** tra chi ha segnalato e l'Ufficio Tecnico (es. "Non si avviano i programmi" → "Quale programma?" → "Office"), con indicatore "in attesa di risposta".
 - **Commenti interni** riservati all'Ufficio Tecnico, con @menzioni dei colleghi.
+- In conversazione e commenti si può **rispondere a un messaggio specifico** (citazione cliccabile che porta all'originale, notifica all'autore).
+- **Foto allegate** (fino a 10 per ticket, JPEG/PNG/WebP, max 5 MB ciascuna): si aggiungono alla creazione o in seguito, il browser le ridimensiona prima dell'invio (lato massimo 1600 px). Sono visibili solo a chi ha segnalato e all'Ufficio Tecnico.
 - Viste: elenco con filtri (stato, priorità, categoria, plesso, aula, ricerca), **Bacheca Kanban** con trascinamento tra le colonne, **Assegnate a me**.
 
 ### Prenotazione dei locali
@@ -164,7 +167,7 @@ Gli studenti non hanno accesso. Possono entrare solo account Google `@itisgrassi
 - L'Ufficio Tecnico vede tutte le prossime prenotazioni, per preparare e portare i carrelli.
 
 ### Notifiche
-Campanella con contatore, aggiornata ogni 30 secondi. Si genera una notifica quando: si viene menzionati in un commento interno; si viene assegnati a un ticket; cambia lo stato di una propria segnalazione; arriva un messaggio nella conversazione di un ticket; c'è una prenotazione da approvare, approvata o rifiutata; c'è una nuova prenotazione in un locale di cui si è assistente tecnico. Chi compie un'azione non riceve la notifica di se stesso.
+Campanella con contatore, aggiornata ogni 30 secondi. Si genera una notifica quando: si viene menzionati in un commento interno; si viene assegnati a un ticket; cambia lo stato di una propria segnalazione; arriva un messaggio nella conversazione di un ticket; c'è una prenotazione da approvare, approvata o rifiutata; c'è una nuova prenotazione in un locale di cui si è assistente tecnico; qualcuno risponde a un proprio messaggio o commento. Chi compie un'azione non riceve la notifica di se stesso.
 
 ### Altro
 - **Dashboard**: contatori dei ticket e ultime segnalazioni.
@@ -183,6 +186,7 @@ erDiagram
     USERS ||--o{ TICKET_ASSIGNEES : ""
     TICKETS ||--o{ TICKET_MESSAGES : "conversazione"
     TICKETS ||--o{ TICKET_COMMENTS : "commenti interni"
+    TICKETS ||--o{ TICKET_ATTACHMENTS : "foto"
     USERS ||--o{ NOTIFICATIONS : "riceve"
     ROOMS ||--o{ BOOKINGS : "prenotato"
     USERS ||--o{ BOOKINGS : "prenota"
@@ -197,8 +201,9 @@ erDiagram
 | `rooms` | codice (es. A01), tipo, plesso, prenotabile, orario libero, responsabile ed email, assistente tecnico ed email, dotazioni, attivo |
 | `tickets` | codice, titolo, descrizione, stato, plesso, categoria, priorità, date (inserimento, presa in carico, chiusura, aggiornamento), dati FACTOTUM, locale, autore |
 | `ticket_assignees` | tecnici assegnati a un ticket, con data e autore dell'assegnazione |
-| `ticket_messages` | conversazione tra chi ha segnalato e l'Ufficio Tecnico |
-| `ticket_comments` | commenti interni dell'Ufficio Tecnico |
+| `ticket_messages` | conversazione tra chi ha segnalato e l'Ufficio Tecnico; `reply_to_id` = messaggio a cui risponde |
+| `ticket_comments` | commenti interni dell'Ufficio Tecnico; `reply_to_id` = commento a cui risponde |
+| `ticket_attachments` | foto allegate: nome originale, nome casuale del file su disco, tipo, dimensione, chi l'ha caricata. I file sono nella cartella `uploads` (in produzione volume Docker `uploads_data`) |
 | `notifications` | destinatario, tipo, titolo, messaggio, ticket o pagina collegata, letta |
 | `bookings` | prenotazioni dei locali: una riga per ora (o una riga con orario libero), stato (Approvata, In attesa, Rifiutata), motivazioni, extra, chi ha deciso |
 | `resources` | carrelli: nome, numero di PC, plesso, posizione, descrizione |
@@ -215,7 +220,7 @@ Legenda della colonna **Accesso**:
 - **Supervisore, Manager** / **Supervisore**: solo questi ruoli; gli altri ricevono `403`.
 - Senza login valido la risposta è `401`.
 
-Solo **2 endpoint su 48** sono pubblici, e servono al login.
+Solo **2 endpoint su 52** sono pubblici, e servono al login.
 
 ### Autenticazione
 
@@ -249,9 +254,13 @@ Solo **2 endpoint su 48** sono pubblici, e servono al login.
 | POST | `/tickets/{ticket_id}/presa-in-carico` | Supervisore, Manager | Prendi in carico |
 | DELETE | `/tickets/{ticket_id}/presa-in-carico` | Supervisore, Manager | Lascia la presa in carico |
 | GET | `/tickets/{ticket_id}/messages` | Login | Conversazione — solo l'autore del ticket o l'Ufficio Tecnico |
-| POST | `/tickets/{ticket_id}/messages` | Login | Nuovo messaggio — solo l'autore del ticket o l'Ufficio Tecnico |
+| POST | `/tickets/{ticket_id}/messages` | Login | Nuovo messaggio (con `reply_to_id` facoltativo) — solo l'autore del ticket o l'Ufficio Tecnico |
+| GET | `/tickets/{ticket_id}/attachments` | Login | Elenco delle foto — solo l'autore del ticket o l'Ufficio Tecnico |
+| POST | `/tickets/{ticket_id}/attachments` | Login | Carica una foto (multipart, max 5 MB, solo JPEG/PNG/WebP riconosciute dal contenuto) — solo l'autore del ticket o l'Ufficio Tecnico |
+| GET | `/tickets/{ticket_id}/attachments/{attachment_id}` | Login | Scarica la foto — solo l'autore del ticket o l'Ufficio Tecnico |
+| DELETE | `/tickets/{ticket_id}/attachments/{attachment_id}` | Login | Elimina la foto — solo chi l'ha caricata o il Supervisore |
 | GET | `/tickets/{ticket_id}/comments` | Supervisore, Manager | Commenti interni |
-| POST | `/tickets/{ticket_id}/comments` | Supervisore, Manager | Nuovo commento interno |
+| POST | `/tickets/{ticket_id}/comments` | Supervisore, Manager | Nuovo commento interno (con `reply_to_id` facoltativo) |
 | DELETE | `/comments/{comment_id}` | Supervisore, Manager | Elimina commento — solo l'autore o il Supervisore |
 
 ### Notifiche, statistiche e dashboard
@@ -312,8 +321,9 @@ Solo **2 endpoint su 48** sono pubblici, e servono al login.
 - **Nessun dato visibile senza login**: il frontend mostra solo la schermata di accesso; le API pubbliche sono solo le due necessarie al login. La Dashboard TV senza login richiede una chiave segreta.
 - **Protezione da SQL injection**: tutte le query passano dall'ORM SQLAlchemy con parametri.
 - **Protezione da XSS**: React esegue l'escape di tutti i contenuti; nel codice non si inserisce HTML non controllato.
+- **Foto protette**: si scaricano solo con il token (il browser le mostra come immagini locali `blob:`), il tipo è verificato dai primi byte del file e non dall'estensione, il nome sul disco è casuale (nessun percorso scelto dall'utente).
 - **Database non esposto** in produzione; password e chiavi nel file `.env`, escluso dal repository.
-- **Limiti sui dati in ingresso**: lunghezza massima di ogni campo di testo (es. titolo 150 caratteri, descrizione, messaggi e commenti 4000, motivo della prenotazione 500), numero massimo di elementi nelle liste, richieste al backend al massimo di 2 MB (controllo sia in Caddy sia nel backend). Gli errori di validazione tornano con un messaggio in italiano.
+- **Limiti sui dati in ingresso**: lunghezza massima di ogni campo di testo (es. titolo 150 caratteri, descrizione, messaggi e commenti 4000, motivo della prenotazione 500), numero massimo di elementi nelle liste, richieste al backend al massimo di 2 MB, 5 MB per le foto (controllo sia in Caddy sia nel backend). Gli errori di validazione tornano con un messaggio in italiano.
 - **Limite al numero di richieste** (rate limiting) per indirizzo IP: 1200 al minuto in generale e 30 al minuto per il login; oltre si riceve `429 Troppe richieste`. Il limite generale è alto perché tutta la scuola può uscire su internet con lo stesso IP; entrambi i valori si cambiano dal `.env`.
 - **CORS** limitato al dominio del sito in produzione (`CORS_ORIGINS`), senza cookie (il token viaggia nell'header `Authorization`).
 - **Intestazioni di sicurezza HTTP** aggiunte da Caddy: HSTS, `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy` e una `Content-Security-Policy` che permette di caricare risorse solo dal sito stesso e dal login di Google.
@@ -343,6 +353,7 @@ Solo **2 endpoint su 48** sono pubblici, e servono al login.
 | `CORS_ORIGINS` | Siti da cui il browser può chiamare le API, separati da virgola; vuoto = tutti (sviluppo). In produzione è impostato in automatico a `https://DOMINIO` |
 | `RATE_LIMIT_PER_MINUTE` | Richieste al minuto per IP (default 1200) |
 | `LOGIN_LIMIT_PER_MINUTE` | Tentativi di login al minuto per IP (default 30) |
+| `UPLOAD_DIR` | Cartella delle foto allegate (default `backend/uploads`; in produzione `/data/uploads`, volume `uploads_data`) |
 
 ### Avvio
 - **Sviluppo sul PC**: `docker compose up -d` → sito su `http://localhost:3000`, API su `http://localhost:8000`.

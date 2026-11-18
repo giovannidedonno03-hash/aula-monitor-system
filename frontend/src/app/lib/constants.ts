@@ -274,6 +274,7 @@ export interface Ticket {
   comments_count: number;
   messages_count: number; // messaggi della conversazione con chi ha segnalato
   awaiting_reporter: boolean; // l'Ufficio Tecnico ha scritto e aspetta una risposta
+  attachments_count: number; // foto allegate
   taken_at: string | null;
   resolved_at: string | null;
   factotum_code: string | null;
@@ -299,7 +300,7 @@ export interface StaffUser {
 
 export interface AppNotification {
   id: number;
-  type: "MENZIONE" | "ASSEGNAZIONE" | "STATO" | "PRENOTAZIONE" | "MESSAGGIO";
+  type: "MENZIONE" | "ASSEGNAZIONE" | "STATO" | "PRENOTAZIONE" | "MESSAGGIO" | "RISPOSTA";
   title: string;
   message: string;
   ticket_id: number | null;
@@ -318,6 +319,26 @@ export interface TicketMessage {
   author_is_staff: boolean; // risposta dell'Ufficio Tecnico
   content: string;
   created_at: string;
+  reply_to: ReplyRef | null; // messaggio a cui risponde
+}
+
+/** Anteprima del messaggio o commento a cui si risponde */
+export interface ReplyRef {
+  id: number;
+  author_name: string;
+  content: string;
+}
+
+/** Foto allegata a un ticket */
+export interface TicketAttachment {
+  id: number;
+  ticket_id: number;
+  uploader_id: number;
+  uploader_name: string;
+  filename: string;
+  content_type: string;
+  size: number;
+  created_at: string;
 }
 
 export interface TicketComment {
@@ -329,6 +350,7 @@ export interface TicketComment {
   author_picture: string | null;
   content: string;
   created_at: string;
+  reply_to: ReplyRef | null; // commento a cui risponde
 }
 
 // Il backend salva le date in UTC senza fuso: aggiungiamo "Z" per mostrarle nell'ora locale

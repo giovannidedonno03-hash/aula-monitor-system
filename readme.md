@@ -61,7 +61,9 @@ La **campanella** in alto avvisa quando:
 
 Cliccando sulla notifica si apre direttamente il ticket.
 
-Nel dettaglio del ticket c'è la **Conversazione** tra chi ha segnalato e l'Ufficio Tecnico (es. "Non si avviano i programmi" → "Quale programma?" → "Office"): la vedono e la scrivono solo loro, con notifica a ogni messaggio. I **commenti interni** restano invece visibili solo all'Ufficio Tecnico.
+Nel dettaglio del ticket c'è la **Conversazione** tra chi ha segnalato e l'Ufficio Tecnico (es. "Non si avviano i programmi" → "Quale programma?" → "Office"): la vedono e la scrivono solo loro, con notifica a ogni messaggio. I **commenti interni** restano invece visibili solo all'Ufficio Tecnico. Sia nella conversazione sia nei commenti si può **rispondere a un messaggio in particolare** (come su WhatsApp): la risposta mostra la citazione del messaggio originale e chi l'aveva scritto riceve una notifica.
+
+Alle segnalazioni si possono **allegare foto** (fino a 10, JPEG/PNG/WebP), sia quando si crea il ticket sia dopo, ad esempio se l'Ufficio Tecnico ne chiede una. Il sito riduce le foto prima di inviarle; le vedono solo chi ha segnalato e l'Ufficio Tecnico.
 
 La **Bacheca Kanban** (`/kanban`, solo Ufficio Tecnico) mostra i ticket in colonne per stato: trascinando un cartellino in un'altra colonna se ne cambia lo stato (verso FACTOTUM viene chiesto il codice pratica); cliccandolo si apre il dettaglio per assegnarlo, commentarlo o eliminarlo. Filtri per plesso, priorità e "solo assegnati a me"; la colonna Risolto mostra di default gli ultimi 14 giorni.
 

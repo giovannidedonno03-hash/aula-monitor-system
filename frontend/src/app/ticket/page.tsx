@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import TicketDetailModal from "../components/TicketDetailModal";
 import UserAvatar from "../components/UserAvatar";
+import { MAX_PHOTOS_PER_TICKET, uploadTicketPhoto } from "../lib/attachments";
 import {
   getApiBase,
   CATEGORIES,
@@ -69,6 +70,28 @@ function TicketPageContent() {
   const [category, setCategory] = useState<string>("INFORMATICO");
   const [priority, setPriority] = useState<string>("MEDIA");
   const [submitting, setSubmitting] = useState(false);
+  // Foto da allegare alla nuova segnalazione (con anteprima)
+  const [newPhotos, setNewPhotos] = useState<{ file: File; url: string }[]>([]);
+
+  const addNewPhotos = (files: FileList | null) => {
+    if (!files) return;
+    const room = MAX_PHOTOS_PER_TICKET - newPhotos.length;
+    const list = Array.from(files).slice(0, room);
+    if (list.length < files.length) alert(`Si possono allegare al massimo ${MAX_PHOTOS_PER_TICKET} foto.`);
+    setNewPhotos((prev) => [...prev, ...list.map((file) => ({ file, url: URL.createObjectURL(file) }))]);
+  };
+
+  const removeNewPhoto = (i: number) =>
+    setNewPhotos((prev) => {
+      URL.revokeObjectURL(prev[i].url);
+      return prev.filter((_, j) => j !== i);
+    });
+
+  const clearNewPhotos = () =>
+    setNewPhotos((prev) => {
+      prev.forEach((p) => URL.revokeObjectURL(p.url));
+      return [];
+    });
 
   const staff = isStaff(user?.role);
 
@@ -167,12 +190,25 @@ function TicketPageContent() {
         const data = await res.json().catch(() => ({}));
         throw new Error(typeof data.detail === "string" ? data.detail : "Errore durante la creazione del ticket.");
       }
+      const created: Ticket = await res.json();
+
+      // Foto: si caricano una alla volta dopo aver creato la segnalazione
+      const errors: string[] = [];
+      for (const p of newPhotos) {
+        try {
+          await uploadTicketPhoto(created.id, p.file);
+        } catch (err: any) {
+          errors.push(err.message);
+        }
+      }
 
       setTitle("");
       setDescription("");
       setPriority("MEDIA");
+      clearNewPhotos();
       setShowModal(false);
       fetchData();
+      if (errors.length) alert(`Segnalazione inviata, ma alcune foto non sono state caricate:\n${errors.join("\n")}`);
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -370,6 +406,7 @@ function TicketPageContent() {
                   </div>
                   <div className="flex items-center gap-2 shrink-0 text-[var(--text-muted)]">
                     {t.messages_count > 0 && <span title="Messaggi con chi ha segnalato">✉ {t.messages_count}</span>}
+                    {t.attachments_count > 0 && <span title="Foto allegate">📷 {t.attachments_count}</span>}
                     {staff && t.comments_count > 0 && <span title="Commenti interni">💬 {t.comments_count}</span>}
                     <span>{formatDateTime(t.created_at)}</span>
                   </div>
@@ -478,6 +515,43 @@ function TicketPageContent() {
                   onChange={(e) => setDescription(e.target.value)}
                   className={inputClass}
                 />
+              </div>
+
+              <div>
+                <label className="text-xs text-[var(--text-muted)] block mb-1">
+                  Foto del guasto <span className="opacity-70">(facoltative, max {MAX_PHOTOS_PER_TICKET})</span>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {newPhotos.map((p, i) => (
+                    <div key={p.url} className="relative w-16 h-16 rounded-lg overflow-hidden border border-[var(--border-color)]">
+                      <img src={p.url} alt={p.file.name} className="w-full h-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => removeNewPhoto(i)}
+                        aria-label="Rimuovi foto"
+                        className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 text-white text-xs leading-none"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  {newPhotos.length < MAX_PHOTOS_PER_TICKET && (
+                    <label className="w-16 h-16 rounded-lg border border-dashed border-[var(--border-color)] flex flex-col items-center justify-center text-[10px] text-[var(--text-muted)] cursor-pointer hover:border-blue-500/60 hover:text-[var(--text-main)] transition">
+                      <span className="text-lg leading-none">📷</span>
+                      Aggiungi
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/*"
+                        multiple
+                        className="hidden"
+                        onChange={(e) => {
+                          addNewPhotos(e.target.files);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">

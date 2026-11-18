@@ -112,6 +112,14 @@ git pull
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
+Se tra le modifiche c'è anche `deploy/Caddyfile`, Caddy va riavviato perché rilegga il file (altrimenti continua a usare la versione vecchia):
+
+```bash
+docker compose -f docker-compose.prod.yml restart caddy
+```
+
+Le foto allegate ai ticket sono nel volume Docker `uploads_data` (come il database in `postgres_data`): non si perdono ricostruendo i container. Nei backup vanno salvati entrambi.
+
 ## Problemi frequenti
 
 - **Il sito non si apre / errore di certificato**: controlla che l'alias punti all'IP del server

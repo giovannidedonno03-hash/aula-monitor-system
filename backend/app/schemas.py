@@ -64,6 +64,7 @@ class TicketResponse(BaseModel):
     assigned_to_name: Optional[str] = None   # nomi dei tecnici separati da virgola
     comments_count: int = 0
     messages_count: int = 0
+    attachments_count: int = 0
     awaiting_reporter: bool = False   # l'Ufficio Tecnico ha fatto una domanda e aspetta risposta
     taken_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
@@ -93,6 +94,23 @@ class StaffUserOut(BaseModel):
 
 class CommentCreate(BaseModel):
     content: str = Field(max_length=4000)
+    reply_to_id: Optional[int] = None   # risposta a un messaggio/commento in particolare
+
+class ReplyRef(BaseModel):
+    """Anteprima del messaggio a cui si risponde."""
+    id: int
+    author_name: str
+    content: str
+
+class AttachmentOut(BaseModel):
+    id: int
+    ticket_id: int
+    uploader_id: int
+    uploader_name: str
+    filename: str
+    content_type: str
+    size: int
+    created_at: datetime
 
 class MessageOut(BaseModel):
     id: int
@@ -104,6 +122,7 @@ class MessageOut(BaseModel):
     author_is_staff: bool     # True = risposta dell'Ufficio Tecnico
     content: str
     created_at: datetime
+    reply_to: Optional[ReplyRef] = None
 
 class CommentOut(BaseModel):
     id: int
@@ -114,6 +133,7 @@ class CommentOut(BaseModel):
     author_picture: Optional[str] = None
     content: str
     created_at: datetime
+    reply_to: Optional[ReplyRef] = None
 
 TicketResponse.model_rebuild()
 

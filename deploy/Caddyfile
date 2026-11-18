@@ -24,9 +24,10 @@
 	}
 
 	handle /api/* {
-		# Richieste al backend al massimo di 2 MB (bastano per CSV dei locali e orario)
+		# Richieste al backend al massimo di 6 MB (foto dei ticket fino a 5 MB;
+		# per tutto il resto il backend stesso accetta al massimo 2 MB)
 		request_body {
-			max_size 2MB
+			max_size 6MB
 		}
 		reverse_proxy backend:8000
 	}

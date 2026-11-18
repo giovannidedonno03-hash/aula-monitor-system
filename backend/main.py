@@ -18,7 +18,9 @@ import app.schemas as schemas
 from app.auth import verify_google_token, create_access_token, get_current_user, get_optional_user, require_role, email_allowed, domain_error, ALLOWED_EMAIL_DOMAIN, TV_KIOSK_KEY
 import hmac
 from app.room_import import parse_rooms_csv, apply_rooms
-from app.notifications import notify, notify_status_change, notify_assigned, notify_mentions, notify_message
+from app.notifications import notify, notify_status_change, notify_assigned, notify_mentions, notify_message, notify_reply
+from fastapi.responses import FileResponse
+from pathlib import Path
 from app import bookings as booking_rules
 from app import resources as resource_rules
 import json
@@ -105,6 +107,12 @@ with engine.begin() as conn:
     for ddl in ("responsible_email VARCHAR", "technical_assistant_email VARCHAR"):
         conn.execute(text(f"ALTER TABLE rooms ADD COLUMN IF NOT EXISTS {ddl}"))
     conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS link VARCHAR"))
+    # Risposte a un messaggio/commento in particolare
+    for table in ("ticket_messages", "ticket_comments"):
+        conn.execute(text(
+            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS reply_to_id INTEGER "
+            f"REFERENCES {table}(id) ON DELETE SET NULL"
+        ))
 
 # Orario delle lezioni iniziale (data/orario_lezioni.json) al primo avvio
 with SessionLocal() as _db:
@@ -151,6 +159,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "1200"))
 LOGIN_LIMIT_PER_MINUTE = int(os.getenv("LOGIN_LIMIT_PER_MINUTE", "30"))
 MAX_BODY_BYTES = 2 * 1024 * 1024   # 2 MB: bastano per l'orario delle lezioni e il CSV dei locali
+MAX_PHOTO_BYTES = 5 * 1024 * 1024  # 5 MB per foto (il sito le comprime prima di inviarle)
 _hits: dict[str, deque] = {}
 _hits_cleanup = [0.0]
 
@@ -170,8 +179,13 @@ async def security_limits(request: Request, call_next):
 
     # Corpo della richiesta troppo grande
     length = request.headers.get("content-length")
-    if length and length.isdigit() and int(length) > MAX_BODY_BYTES:
-        return JSONResponse(status_code=413, content={"detail": "Richiesta troppo grande (massimo 2 MB)."})
+    is_photo_upload = request.method == "POST" and request.url.path.endswith("/attachments")
+    limit = MAX_PHOTO_BYTES + 512 * 1024 if is_photo_upload else MAX_BODY_BYTES
+    if length and length.isdigit() and int(length) > limit:
+        return JSONResponse(
+            status_code=413,
+            content={"detail": f"Richiesta troppo grande (massimo {limit // (1024 * 1024)} MB)."},
+        )
 
     now = time.monotonic()
     if now - _hits_cleanup[0] > 300:   # ogni 5 minuti si dimenticano gli IP inattivi
@@ -339,9 +353,11 @@ def delete_room(
     room = db.query(models.Room).filter(models.Room.id == room_id).first()
     if not room:
         raise HTTPException(status_code=404, detail="Aula non trovata.")
-    
+
+    files = [a.stored_name for t in room.tickets for a in t.attachments]
     db.delete(room)
     db.commit()
+    _remove_files(files)
     return None
 
 import uuid
@@ -449,8 +465,10 @@ def delete_ticket(
         raise HTTPException(status_code=404, detail="Ticket non trovato.")
     if ticket.reporter_id != current_user.id and current_user.role != models.UserRole.SUPERVISORE:
         raise HTTPException(status_code=403, detail="Puoi eliminare solo le segnalazioni che hai creato tu.")
+    files = [a.stored_name for a in ticket.attachments]
     db.delete(ticket)
     db.commit()
+    _remove_files(files)
     return None
 
 # --- ASSEGNAZIONE DEI TICKET ---
@@ -564,6 +582,28 @@ MAX_TEXT = 4000  # lunghezza massima di un messaggio o commento
 def _can_talk(user: models.User, ticket: models.Ticket) -> bool:
     return user.role in models.STAFF_ROLES or ticket.reporter_id == user.id
 
+def _excerpt(text_: str, n: int = 140) -> str:
+    return text_ if len(text_) <= n else text_[: n - 1] + "…"
+
+def _reply_ref(r) -> Optional[dict]:
+    """Anteprima del messaggio/commento a cui si risponde (None se non c'e' o e' stato eliminato)."""
+    if r is None:
+        return None
+    return {
+        "id": r.id,
+        "author_name": (r.author.full_name or r.author.email) if r.author else "",
+        "content": _excerpt(r.content),
+    }
+
+def _reply_target(db: Session, model, ticket: models.Ticket, reply_to_id: Optional[int]):
+    """Controlla che il messaggio/commento a cui si risponde sia dello stesso ticket."""
+    if reply_to_id is None:
+        return None
+    target = db.query(model).filter(model.id == reply_to_id, model.ticket_id == ticket.id).first()
+    if target is None:
+        raise HTTPException(status_code=400, detail="Il messaggio a cui rispondi non esiste piu'.")
+    return target
+
 def _message_out(m: models.TicketMessage) -> dict:
     return {
         "id": m.id,
@@ -575,6 +615,7 @@ def _message_out(m: models.TicketMessage) -> dict:
         "author_is_staff": bool(m.author and m.author.role in models.STAFF_ROLES and m.author_id != m.ticket.reporter_id),
         "content": m.content,
         "created_at": m.created_at,
+        "reply_to": _reply_ref(m.reply_to),
     }
 
 @app.get("/api/v1/tickets/{ticket_id}/messages", response_model=List[schemas.MessageOut])
@@ -603,11 +644,16 @@ def add_ticket_message(
         raise HTTPException(status_code=400, detail="Il messaggio e' vuoto.")
     if len(content) > MAX_TEXT:
         raise HTTPException(status_code=400, detail=f"Il messaggio e' troppo lungo (massimo {MAX_TEXT} caratteri).")
-    msg = models.TicketMessage(ticket_id=ticket.id, author_id=current_user.id, content=content)
+    target = _reply_target(db, models.TicketMessage, ticket, data.reply_to_id)
+    msg = models.TicketMessage(
+        ticket_id=ticket.id, author_id=current_user.id, content=content,
+        reply_to_id=target.id if target else None,
+    )
     db.add(msg)
     ticket.updated_at = datetime.utcnow()
     db.flush()
-    notify_message(db, ticket, current_user, content)
+    notified = notify_message(db, ticket, current_user, content)
+    notify_reply(db, ticket, current_user, content, target.author_id if target else None, notified)
     db.commit()
     db.refresh(msg)
     return _message_out(msg)
@@ -625,6 +671,7 @@ def _comment_out(c: models.TicketComment) -> dict:
         "author_picture": c.author.picture if c.author else None,
         "content": c.content,
         "created_at": c.created_at,
+        "reply_to": _reply_ref(c.reply_to),
     }
 
 @app.get("/api/v1/tickets/{ticket_id}/comments", response_model=List[schemas.CommentOut])
@@ -649,10 +696,15 @@ def add_ticket_comment(
         raise HTTPException(status_code=400, detail="Il commento e' vuoto.")
     if len(content) > MAX_TEXT:
         raise HTTPException(status_code=400, detail=f"Il commento e' troppo lungo (massimo {MAX_TEXT} caratteri).")
-    comment = models.TicketComment(ticket_id=ticket.id, author_id=current_user.id, content=content)
+    target = _reply_target(db, models.TicketComment, ticket, data.reply_to_id)
+    comment = models.TicketComment(
+        ticket_id=ticket.id, author_id=current_user.id, content=content,
+        reply_to_id=target.id if target else None,
+    )
     db.add(comment)
     ticket.updated_at = datetime.utcnow()
-    notify_mentions(db, ticket, content, current_user)
+    mentioned = notify_mentions(db, ticket, content, current_user)
+    notify_reply(db, ticket, current_user, content, target.author_id if target else None, mentioned)
     db.commit()
     db.refresh(comment)
     return _comment_out(comment)
@@ -671,6 +723,143 @@ def delete_ticket_comment(
         raise HTTPException(status_code=403, detail="Puoi eliminare solo i tuoi commenti.")
     db.delete(comment)
     db.commit()
+    return None
+
+
+# --- FOTO ALLEGATE AI TICKET ---
+# Le vedono e le aggiungono chi ha segnalato e l'Ufficio Tecnico (come la conversazione).
+# I file stanno nella cartella uploads (in produzione e' un volume Docker), con un nome casuale;
+# si accettano solo immagini JPEG, PNG e WebP, riconosciute dal contenuto e non dal nome.
+
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(Path(__file__).resolve().parent / "uploads")))
+MAX_PHOTOS_PER_TICKET = 10
+
+def _remove_files(stored_names: List[str]) -> None:
+    for name in stored_names:
+        try:
+            (UPLOAD_DIR / name).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+def _image_type(data: bytes) -> Optional[tuple]:
+    """(content_type, estensione) se i primi byte sono di un'immagine ammessa."""
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg", "jpg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png", "png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp", "webp"
+    return None
+
+def _attachment_out(a: models.TicketAttachment) -> dict:
+    return {
+        "id": a.id,
+        "ticket_id": a.ticket_id,
+        "uploader_id": a.uploader_id,
+        "uploader_name": (a.uploader.full_name or a.uploader.email) if a.uploader else "",
+        "filename": a.filename,
+        "content_type": a.content_type,
+        "size": a.size,
+        "created_at": a.created_at,
+    }
+
+def _get_attachment(db: Session, ticket_id: int, attachment_id: int) -> models.TicketAttachment:
+    a = (
+        db.query(models.TicketAttachment)
+        .filter(models.TicketAttachment.id == attachment_id, models.TicketAttachment.ticket_id == ticket_id)
+        .first()
+    )
+    if not a:
+        raise HTTPException(status_code=404, detail="Foto non trovata.")
+    return a
+
+@app.get("/api/v1/tickets/{ticket_id}/attachments", response_model=List[schemas.AttachmentOut])
+def get_ticket_attachments(
+    ticket_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    ticket = _get_ticket_or_404(db, ticket_id)
+    if not _can_talk(current_user, ticket):
+        raise HTTPException(status_code=403, detail="Non puoi vedere le foto di questa segnalazione.")
+    return [_attachment_out(a) for a in ticket.attachments]
+
+@app.post("/api/v1/tickets/{ticket_id}/attachments", response_model=schemas.AttachmentOut)
+async def add_ticket_attachment(
+    ticket_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    ticket = _get_ticket_or_404(db, ticket_id)
+    if not _can_talk(current_user, ticket):
+        raise HTTPException(status_code=403, detail="Non puoi aggiungere foto a questa segnalazione.")
+    if len(ticket.attachments) >= MAX_PHOTOS_PER_TICKET:
+        raise HTTPException(status_code=400, detail=f"Massimo {MAX_PHOTOS_PER_TICKET} foto per segnalazione.")
+
+    data = await file.read(MAX_PHOTO_BYTES + 1)
+    if len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(status_code=413, detail="Foto troppo grande (massimo 5 MB).")
+    kind = _image_type(data)
+    if kind is None:
+        raise HTTPException(status_code=400, detail="Sono ammesse solo immagini JPEG, PNG o WebP.")
+    content_type, ext = kind
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    stored_name = f"{uuid.uuid4().hex}.{ext}"
+    (UPLOAD_DIR / stored_name).write_bytes(data)
+
+    original = Path(file.filename or "foto").name[:120] or "foto"
+    att = models.TicketAttachment(
+        ticket_id=ticket.id, uploader_id=current_user.id, filename=original,
+        stored_name=stored_name, content_type=content_type, size=len(data),
+    )
+    db.add(att)
+    ticket.updated_at = datetime.utcnow()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        _remove_files([stored_name])
+        raise
+    db.refresh(att)
+    return _attachment_out(att)
+
+@app.get("/api/v1/tickets/{ticket_id}/attachments/{attachment_id}")
+def get_ticket_attachment_file(
+    ticket_id: int,
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    ticket = _get_ticket_or_404(db, ticket_id)
+    if not _can_talk(current_user, ticket):
+        raise HTTPException(status_code=403, detail="Non puoi vedere le foto di questa segnalazione.")
+    a = _get_attachment(db, ticket_id, attachment_id)
+    path = UPLOAD_DIR / a.stored_name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Il file della foto non e' piu' disponibile.")
+    return FileResponse(
+        path,
+        media_type=a.content_type,
+        headers={"Cache-Control": "private, max-age=86400", "Content-Disposition": "inline"},
+    )
+
+# Elimina una foto: chi l'ha caricata oppure il Supervisore
+@app.delete("/api/v1/tickets/{ticket_id}/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_ticket_attachment(
+    ticket_id: int,
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    a = _get_attachment(db, ticket_id, attachment_id)
+    if a.uploader_id != current_user.id and current_user.role != models.UserRole.SUPERVISORE:
+        raise HTTPException(status_code=403, detail="Puoi eliminare solo le foto che hai caricato tu.")
+    name = a.stored_name
+    db.delete(a)
+    db.commit()
+    _remove_files([name])
     return None
 
 

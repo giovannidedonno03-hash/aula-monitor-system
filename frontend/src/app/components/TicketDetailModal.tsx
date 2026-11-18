@@ -2,11 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import UserAvatar from "./UserAvatar";
+import { MAX_PHOTOS_PER_TICKET, loadPhotoUrl, uploadTicketPhoto } from "../lib/attachments";
 import {
   getApiBase,
+  ReplyRef,
   STATUSES,
   StaffUser,
   Ticket,
+  TicketAttachment,
   TicketComment,
   TicketMessage,
   TicketStatus,
@@ -63,6 +66,49 @@ function renderWithMentions(text: string) {
   );
 }
 
+function excerpt(text: string, n = 140) {
+  return text.length <= n ? text : text.slice(0, n - 1) + "…";
+}
+
+/** Citazione del messaggio a cui si risponde, dentro la bolla (cliccandola si va all'originale) */
+function QuoteBlock({ reply, onJump }: { reply: ReplyRef; onJump: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onJump}
+      className="block w-full text-left px-2 py-1 rounded-md border-l-2 border-blue-500 bg-blue-500/5 hover:bg-blue-500/10 transition"
+    >
+      <span className="block text-[10px] font-semibold text-blue-600 dark:text-blue-400">{reply.author_name}</span>
+      <span className="block text-[11px] text-[var(--text-muted)] line-clamp-2 break-words">{reply.content}</span>
+    </button>
+  );
+}
+
+/** Barra sopra la casella di testo: "Stai rispondendo a ..." */
+function ReplyBar({ reply, onCancel }: { reply: ReplyRef; onCancel: () => void }) {
+  return (
+    <div className="flex items-start gap-2 px-2 py-1.5 rounded-md border-l-2 border-blue-500 bg-blue-500/5">
+      <div className="min-w-0 flex-1">
+        <span className="block text-[10px] font-semibold text-blue-600 dark:text-blue-400">
+          Rispondi a {reply.author_name}
+        </span>
+        <span className="block text-[11px] text-[var(--text-muted)] truncate">{reply.content}</span>
+      </div>
+      <button
+        type="button"
+        onClick={onCancel}
+        aria-label="Annulla risposta"
+        className="text-[var(--text-muted)] hover:text-[var(--text-main)] text-sm leading-none px-1"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+const replyButton =
+  "text-[10px] text-[var(--text-muted)] hover:text-blue-600 dark:hover:text-blue-400 transition sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100";
+
 export default function TicketDetailModal({ ticket, user, onClose, onChanged, onDeleted }: Props) {
   const staff = isStaff(user.role);
   const supervisor = isSupervisor(user.role);
@@ -83,6 +129,18 @@ export default function TicketDetailModal({ ticket, user, onClose, onChanged, on
   const [factotumNotes, setFactotumNotes] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const commentBox = useRef<HTMLTextAreaElement>(null);
+  const messageBox = useRef<HTMLTextAreaElement>(null);
+  // Risposte a un messaggio/commento in particolare
+  const [replyToMessage, setReplyToMessage] = useState<ReplyRef | null>(null);
+  const [replyToComment, setReplyToComment] = useState<ReplyRef | null>(null);
+  const [highlight, setHighlight] = useState<string | null>(null);
+  // Foto allegate
+  const [photos, setPhotos] = useState<TicketAttachment[]>([]);
+  const [photoUrls, setPhotoUrls] = useState<Record<number, string>>({});
+  const [viewer, setViewer] = useState<number | null>(null); // indice della foto aperta a schermo intero
+  const [uploading, setUploading] = useState(false);
+  const photoInput = useRef<HTMLInputElement>(null);
+  const urlsRef = useRef<string[]>([]);
 
   // Tecnici assegnabili e commenti: solo per l'Ufficio Tecnico
   useEffect(() => {
@@ -110,12 +168,97 @@ export default function TicketDetailModal({ ticket, user, onClose, onChanged, on
     messagesEnd.current?.scrollIntoView({ block: "nearest" });
   }, [messages.length]);
 
-  // Chiusura con il tasto Esc
+  // Foto allegate: elenco, poi ogni immagine scaricata con il token
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    if (!canTalk) return;
+    fetch(`${getApiBase()}/tickets/${ticket.id}/attachments`, { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setPhotos)
+      .catch(() => {});
+  }, [canTalk, ticket.id]);
+
+  useEffect(() => {
+    photos
+      .filter((p) => !photoUrls[p.id])
+      .forEach((p) =>
+        loadPhotoUrl(ticket.id, p.id)
+          .then((url) => {
+            urlsRef.current.push(url);
+            setPhotoUrls((prev) => ({ ...prev, [p.id]: url }));
+          })
+          .catch(() => {})
+      );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photos, ticket.id]);
+
+  // Alla chiusura si liberano le immagini scaricate
+  useEffect(() => () => urlsRef.current.forEach((u) => URL.revokeObjectURL(u)), []);
+
+  // Tasto Esc: chiude prima la foto aperta, poi la finestra; frecce per scorrere le foto
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (viewer !== null) {
+        if (e.key === "Escape") setViewer(null);
+        if (e.key === "ArrowRight") setViewer((v) => (v === null ? v : (v + 1) % photos.length));
+        if (e.key === "ArrowLeft") setViewer((v) => (v === null ? v : (v - 1 + photos.length) % photos.length));
+        return;
+      }
+      if (e.key === "Escape") onClose();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, viewer, photos.length]);
+
+  /** Porta al messaggio citato e lo evidenzia per un attimo */
+  const jumpTo = (elementId: string) => {
+    document.getElementById(elementId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlight(elementId);
+    setTimeout(() => setHighlight((h) => (h === elementId ? null : h)), 1600);
+  };
+
+  const startReplyMessage = (m: TicketMessage) => {
+    setReplyToMessage({ id: m.id, author_name: m.author_id === user.id ? "te stesso" : m.author_name, content: excerpt(m.content) });
+    messageBox.current?.focus();
+  };
+
+  const startReplyComment = (c: TicketComment) => {
+    setReplyToComment({ id: c.id, author_name: c.author_id === user.id ? "te stesso" : c.author_name, content: excerpt(c.content) });
+    commentBox.current?.focus();
+  };
+
+  const addPhotos = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const list = Array.from(files).slice(0, MAX_PHOTOS_PER_TICKET - photos.length);
+    if (list.length < files.length) alert(`Si possono allegare al massimo ${MAX_PHOTOS_PER_TICKET} foto per segnalazione.`);
+    setUploading(true);
+    const errors: string[] = [];
+    for (const f of list) {
+      try {
+        const a = await uploadTicketPhoto(ticket.id, f);
+        setPhotos((prev) => [...prev, a]);
+      } catch (e: any) {
+        errors.push(e.message);
+      }
+    }
+    setUploading(false);
+    if (photoInput.current) photoInput.current.value = "";
+    const added = list.length - errors.length;
+    if (added > 0) onChanged({ ...ticket, attachments_count: ticket.attachments_count + added });
+    if (errors.length) alert(errors.join("\n"));
+  };
+
+  const deletePhoto = (p: TicketAttachment) => {
+    if (!confirm("Eliminare questa foto?")) return;
+    run(async () => {
+      await call<void>(`${getApiBase()}/tickets/${ticket.id}/attachments/${p.id}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      setPhotos((prev) => prev.filter((x) => x.id !== p.id));
+      setViewer(null);
+      onChanged({ ...ticket, attachments_count: Math.max(0, ticket.attachments_count - 1) });
+    });
+  };
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -177,10 +320,11 @@ export default function TicketDetailModal({ ticket, user, onClose, onChanged, on
       const c = await call<TicketComment>(`${getApiBase()}/tickets/${ticket.id}/comments`, {
         method: "POST",
         headers: authHeaders(true),
-        body: JSON.stringify({ content: commentText }),
+        body: JSON.stringify({ content: commentText, reply_to_id: replyToComment?.id ?? null }),
       });
       setComments((prev) => [...prev, c]);
       setCommentText("");
+      setReplyToComment(null);
       onChanged({ ...ticket, comments_count: ticket.comments_count + 1 });
     });
   };
@@ -192,10 +336,11 @@ export default function TicketDetailModal({ ticket, user, onClose, onChanged, on
       const msg = await call<TicketMessage>(`${getApiBase()}/tickets/${ticket.id}/messages`, {
         method: "POST",
         headers: authHeaders(true),
-        body: JSON.stringify({ content: messageText }),
+        body: JSON.stringify({ content: messageText, reply_to_id: replyToMessage?.id ?? null }),
       });
       setMessages((prev) => [...prev, msg]);
       setMessageText("");
+      setReplyToMessage(null);
       onChanged({
         ...ticket,
         messages_count: ticket.messages_count + 1,
@@ -208,7 +353,11 @@ export default function TicketDetailModal({ ticket, user, onClose, onChanged, on
     if (!confirm("Eliminare questo commento?")) return;
     run(async () => {
       await call<void>(`${getApiBase()}/comments/${id}`, { method: "DELETE", headers: authHeaders() });
-      setComments((prev) => prev.filter((c) => c.id !== id));
+      // Le risposte al commento eliminato perdono la citazione
+      setComments((prev) =>
+        prev.filter((c) => c.id !== id).map((c) => (c.reply_to?.id === id ? { ...c, reply_to: null } : c))
+      );
+      if (replyToComment?.id === id) setReplyToComment(null);
       onChanged({ ...ticket, comments_count: Math.max(0, ticket.comments_count - 1) });
     });
   };
@@ -263,6 +412,56 @@ export default function TicketDetailModal({ ticket, user, onClose, onChanged, on
 
         <div className="p-5 space-y-5">
           <p className="text-sm text-[var(--text-main)] leading-relaxed whitespace-pre-wrap">{ticket.description}</p>
+
+          {/* Foto allegate */}
+          {canTalk && (photos.length > 0 || ticket.status !== "RISOLTO") && (
+            <section className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className={sectionTitle}>Foto {photos.length > 0 && `(${photos.length})`}</h3>
+                {photos.length < MAX_PHOTOS_PER_TICKET && (
+                  <>
+                    <input
+                      ref={photoInput}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => addPhotos(e.target.files)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => photoInput.current?.click()}
+                      disabled={uploading}
+                      className="px-2.5 py-1 text-[11px] font-semibold rounded-md border bg-[var(--bg-main)] border-[var(--border-color)] text-[var(--text-main)] hover:border-blue-500/50 transition disabled:opacity-50"
+                    >
+                      {uploading ? "Caricamento..." : "📷 Aggiungi foto"}
+                    </button>
+                  </>
+                )}
+              </div>
+              {photos.length === 0 ? (
+                <p className="text-xs text-[var(--text-muted)]">Nessuna foto. Una foto del guasto aiuta l'Ufficio Tecnico.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {photos.map((p, i) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setViewer(i)}
+                      title={`${p.filename} • ${p.uploader_name}`}
+                      className="w-20 h-20 rounded-lg overflow-hidden border border-[var(--border-color)] bg-[var(--bg-main)] hover:border-blue-500/60 transition"
+                    >
+                      {photoUrls[p.id] ? (
+                        <img src={photoUrls[p.id]} alt={p.filename} className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-[10px] text-[var(--text-muted)]">...</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
           {/* Storico */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 p-3 rounded-lg bg-[var(--bg-main)] border border-[var(--border-color)] text-[11px]">
@@ -449,14 +648,20 @@ export default function TicketDetailModal({ ticket, user, onClose, onChanged, on
                 <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                   {messages.map((m) => {
                     const mine = m.author_id === user.id;
+                    const elId = `msg-${m.id}`;
                     return (
-                      <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                      <div key={m.id} id={elId} className={`group flex items-center gap-1 ${mine ? "justify-end" : "justify-start"}`}>
+                        {mine && (
+                          <button type="button" onClick={() => startReplyMessage(m)} className={replyButton} title="Rispondi">
+                            ↩ Rispondi
+                          </button>
+                        )}
                         <div
-                          className={`max-w-[85%] px-3 py-2 rounded-xl text-xs space-y-1 border ${
+                          className={`max-w-[85%] px-3 py-2 rounded-xl text-xs space-y-1 border transition ${
                             mine
                               ? "bg-blue-600/10 border-blue-500/30 rounded-br-sm"
                               : "bg-[var(--bg-main)] border-[var(--border-color)] rounded-bl-sm"
-                          }`}
+                          } ${highlight === elId ? "ring-2 ring-blue-500" : ""}`}
                         >
                           <div className="flex items-center gap-1.5 text-[10px] text-[var(--text-muted)]">
                             <span className="font-semibold text-[var(--text-main)]">{mine ? "Tu" : m.author_name}</span>
@@ -467,8 +672,14 @@ export default function TicketDetailModal({ ticket, user, onClose, onChanged, on
                             )}
                             <span>{formatDateTime(m.created_at)}</span>
                           </div>
+                          {m.reply_to && <QuoteBlock reply={m.reply_to} onJump={() => jumpTo(`msg-${m.reply_to!.id}`)} />}
                           <p className="text-[var(--text-main)] whitespace-pre-wrap break-words leading-relaxed">{m.content}</p>
                         </div>
+                        {!mine && (
+                          <button type="button" onClick={() => startReplyMessage(m)} className={replyButton} title="Rispondi">
+                            ↩ Rispondi
+                          </button>
+                        )}
                       </div>
                     );
                   })}
@@ -476,8 +687,10 @@ export default function TicketDetailModal({ ticket, user, onClose, onChanged, on
                 </div>
               )}
 
+              {replyToMessage && <ReplyBar reply={replyToMessage} onCancel={() => setReplyToMessage(null)} />}
               <form onSubmit={sendMessage} className="flex items-end gap-2">
                 <textarea
+                  ref={messageBox}
                   rows={2}
                   maxLength={4000}
                   placeholder={staff ? "Scrivi a chi ha segnalato..." : "Rispondi all'Ufficio Tecnico..."}
@@ -513,20 +726,36 @@ export default function TicketDetailModal({ ticket, user, onClose, onChanged, on
               ) : (
                 <ul className="space-y-2 max-h-64 overflow-y-auto pr-1">
                   {comments.map((c) => (
-                    <li key={c.id} className="p-3 rounded-lg bg-[var(--bg-main)] border border-[var(--border-color)] text-xs space-y-1">
+                    <li
+                      key={c.id}
+                      id={`cmt-${c.id}`}
+                      className={`group p-3 rounded-lg bg-[var(--bg-main)] border border-[var(--border-color)] text-xs space-y-1 transition ${
+                        highlight === `cmt-${c.id}` ? "ring-2 ring-blue-500" : ""
+                      }`}
+                    >
                       <div className="flex items-center gap-2">
                         <UserAvatar picture={c.author_picture} name={c.author_name} email={c.author_email} size={20} />
                         <span className="font-semibold text-[var(--text-main)]">{c.author_name}</span>
                         <span className="text-[10px] text-[var(--text-muted)]">{formatDateTime(c.created_at)}</span>
-                        {(c.author_id === user.id || supervisor) && (
-                          <button
-                            onClick={() => deleteComment(c.id)}
-                            className="ml-auto text-[10px] text-[var(--text-muted)] hover:text-rose-600 dark:hover:text-rose-400 transition"
-                          >
-                            Elimina
+                        <span className="ml-auto flex items-center gap-3">
+                          <button type="button" onClick={() => startReplyComment(c)} className={replyButton}>
+                            ↩ Rispondi
                           </button>
-                        )}
+                          {(c.author_id === user.id || supervisor) && (
+                            <button
+                              onClick={() => deleteComment(c.id)}
+                              className="text-[10px] text-[var(--text-muted)] hover:text-rose-600 dark:hover:text-rose-400 transition"
+                            >
+                              Elimina
+                            </button>
+                          )}
+                        </span>
                       </div>
+                      {c.reply_to && (
+                        <div className="pl-7">
+                          <QuoteBlock reply={c.reply_to} onJump={() => jumpTo(`cmt-${c.reply_to!.id}`)} />
+                        </div>
+                      )}
                       <p className="text-[var(--text-main)] leading-relaxed whitespace-pre-wrap break-words pl-7">
                         {renderWithMentions(c.content)}
                       </p>
@@ -553,6 +782,7 @@ export default function TicketDetailModal({ ticket, user, onClose, onChanged, on
                       ))}
                   </div>
                 )}
+                {replyToComment && <ReplyBar reply={replyToComment} onCancel={() => setReplyToComment(null)} />}
                 <textarea
                   ref={commentBox}
                   rows={2}
@@ -607,6 +837,77 @@ export default function TicketDetailModal({ ticket, user, onClose, onChanged, on
           )}
         </div>
       </div>
+
+      {/* Foto a schermo intero */}
+      {viewer !== null && photos[viewer] && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/90 flex flex-col items-center justify-center p-4 gap-3"
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            if (e.target === e.currentTarget) setViewer(null);
+          }}
+        >
+          <div className="flex items-center gap-3 text-xs text-white/80 max-w-full">
+            <span className="truncate">
+              {photos[viewer].filename} • {photos[viewer].uploader_name} • {formatDateTime(photos[viewer].created_at)}
+            </span>
+            {(photos[viewer].uploader_id === user.id || supervisor) && (
+              <button
+                type="button"
+                onClick={() => deletePhoto(photos[viewer])}
+                disabled={busy}
+                className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-semibold disabled:opacity-50"
+              >
+                Elimina
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setViewer(null)}
+              aria-label="Chiudi foto"
+              className="px-2 text-white text-xl leading-none"
+            >
+              ×
+            </button>
+          </div>
+          <div className="flex items-center gap-3 max-w-full">
+            {photos.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setViewer((viewer - 1 + photos.length) % photos.length)}
+                aria-label="Foto precedente"
+                className="text-white/80 hover:text-white text-3xl px-2"
+              >
+                ‹
+              </button>
+            )}
+            {photoUrls[photos[viewer].id] ? (
+              <img
+                src={photoUrls[photos[viewer].id]}
+                alt={photos[viewer].filename}
+                className="max-h-[80vh] max-w-[85vw] object-contain rounded-lg"
+              />
+            ) : (
+              <span className="text-white/70 text-sm">Caricamento...</span>
+            )}
+            {photos.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setViewer((viewer + 1) % photos.length)}
+                aria-label="Foto successiva"
+                className="text-white/80 hover:text-white text-3xl px-2"
+              >
+                ›
+              </button>
+            )}
+          </div>
+          {photos.length > 1 && (
+            <span className="text-[11px] text-white/60">
+              {viewer + 1} / {photos.length}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -143,6 +143,11 @@ class Ticket(Base):
         "TicketComment", back_populates="ticket", cascade="all, delete-orphan",
         order_by="TicketComment.created_at",
     )
+    # Foto allegate (i file sono nella cartella uploads del backend)
+    attachments = relationship(
+        "TicketAttachment", back_populates="ticket", cascade="all, delete-orphan",
+        order_by="TicketAttachment.created_at",
+    )
 
     @property
     def assignees(self):
@@ -170,6 +175,10 @@ class Ticket(Base):
     @property
     def messages_count(self):
         return len(self.messages)
+
+    @property
+    def attachments_count(self):
+        return len(self.attachments)
 
     @property
     def awaiting_reporter(self):
@@ -209,9 +218,12 @@ class TicketMessage(Base):
     author_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    # Risposta a un messaggio in particolare (come su WhatsApp)
+    reply_to_id = Column(Integer, ForeignKey("ticket_messages.id", ondelete="SET NULL"), nullable=True)
 
     ticket = relationship("Ticket", back_populates="messages")
     author = relationship("User")
+    reply_to = relationship("TicketMessage", remote_side=[id])
 
 class TicketComment(Base):
     """Commento interno su un ticket, visibile solo all'Ufficio Tecnico."""
@@ -222,9 +234,28 @@ class TicketComment(Base):
     author_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    # Risposta a un commento in particolare (come su WhatsApp)
+    reply_to_id = Column(Integer, ForeignKey("ticket_comments.id", ondelete="SET NULL"), nullable=True)
 
     ticket = relationship("Ticket", back_populates="comments")
     author = relationship("User")
+    reply_to = relationship("TicketComment", remote_side=[id])
+
+class TicketAttachment(Base):
+    """Foto allegata a un ticket. Il file sta su disco (cartella uploads), qui solo i dati."""
+    __tablename__ = "ticket_attachments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True)
+    uploader_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    filename = Column(String, nullable=False)       # nome originale, solo da mostrare
+    stored_name = Column(String, nullable=False, unique=True)  # nome casuale sul disco
+    content_type = Column(String, nullable=False)
+    size = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    ticket = relationship("Ticket", back_populates="attachments")
+    uploader = relationship("User")
 
 class NotificationType(str, enum.Enum):
     MENZIONE = "MENZIONE"          # qualcuno ti ha taggato con @ in un commento
@@ -232,6 +263,7 @@ class NotificationType(str, enum.Enum):
     STATO = "STATO"                # e' cambiato lo stato di una tua segnalazione
     PRENOTAZIONE = "PRENOTAZIONE"  # prenotazione da approvare, approvata o rifiutata
     MESSAGGIO = "MESSAGGIO"        # nuovo messaggio nella conversazione di un ticket
+    RISPOSTA = "RISPOSTA"          # qualcuno ha risposto a un tuo messaggio o commento
 
 class Notification(Base):
     """Notifica per un utente (campanella in alto)."""
